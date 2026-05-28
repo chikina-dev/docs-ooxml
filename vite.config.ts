@@ -1,6 +1,7 @@
 import { defineConfig } from "vite-plus";
 
 export default defineConfig({
+  base: "/docs-ooxml/",
   staged: {
     "*": "vp check --fix",
   },
