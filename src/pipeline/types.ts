@@ -159,8 +159,8 @@ export type WordParagraph =
     };
 
 export type OutputProjection = {
-  kind: "wordOutputProjection";
-  target: "microsoftWord";
+  kind: "ooxmlPartProjection";
+  target: "microsoftWordDocx";
   documentPlan: {
     page: "letter";
     styles: Array<"Normal" | "Heading1" | "Heading2" | "Heading3" | "ListParagraph">;
@@ -171,4 +171,20 @@ export type OutputProjection = {
     }>;
   };
   paragraphs: WordParagraph[];
+  parts: OoxmlPartProjection[];
+};
+
+export type OoxmlPartProjection = {
+  path: string;
+  role:
+    | "contentTypes"
+    | "rootRelationships"
+    | "coreProperties"
+    | "appProperties"
+    | "document"
+    | "styles"
+    | "numbering"
+    | "documentRelationships";
+  contentType?: string;
+  xml: string;
 };

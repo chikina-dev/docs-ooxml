@@ -135,19 +135,29 @@ describe("document pipeline", () => {
     expect(graph.edges).toContainEqual({ from: "list-1", to: "block-5", kind: "continuesList" });
   });
 
-  it("projects the semantic graph into Word-specific output instructions", () => {
+  it("projects the semantic graph into OOXML part instructions", () => {
     const projection = semanticGraphToOutputProjection(
       authorTreeToSemanticGraph(lexicalJsonToAuthorTree(lexicalJson)),
     );
 
     expect(projection).toMatchObject({
-      kind: "wordOutputProjection",
-      target: "microsoftWord",
+      kind: "ooxmlPartProjection",
+      target: "microsoftWordDocx",
       documentPlan: {
         page: "letter",
         styles: ["Normal", "Heading1", "Heading2", "Heading3", "ListParagraph"],
         numbering: [{ listGroupId: "list-1", listKind: "number", numId: 2 }],
       },
+      parts: [
+        { path: "[Content_Types].xml", role: "contentTypes" },
+        { path: "_rels/.rels", role: "rootRelationships" },
+        { path: "docProps/core.xml", role: "coreProperties" },
+        { path: "docProps/app.xml", role: "appProperties" },
+        { path: "word/document.xml", role: "document" },
+        { path: "word/styles.xml", role: "styles" },
+        { path: "word/numbering.xml", role: "numbering" },
+        { path: "word/_rels/document.xml.rels", role: "documentRelationships" },
+      ],
     });
     expect(projection.paragraphs).toMatchObject([
       {

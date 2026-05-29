@@ -1,10 +1,22 @@
 import type {
+  OoxmlPartProjection,
   OutputProjection,
   SemanticAuthorGraph,
   SemanticBlock,
   SemanticInline,
+  WordParagraph,
   WordRun,
 } from "./types.ts";
+import {
+  appPropertiesXml,
+  contentTypesXml,
+  corePropertiesTemplateXml,
+  documentRelationshipsXml,
+  documentXml,
+  numberingXml,
+  rootRelationshipsXml,
+  stylesXml,
+} from "../ooxml/parts.ts";
 
 export function semanticGraphToOutputProjection(graph: SemanticAuthorGraph): OutputProjection {
   const numbering = graph.listGroups.map((listGroup) => ({
@@ -12,22 +24,27 @@ export function semanticGraphToOutputProjection(graph: SemanticAuthorGraph): Out
     listKind: listGroup.listKind,
     numId: (listGroup.listKind === "number" ? 2 : 1) as 1 | 2,
   }));
+  const paragraphs = graph.readingOrder.map((blockId) =>
+    blockToWordParagraph(blockById(graph, blockId)),
+  );
+  const documentPlan = {
+    page: "letter" as const,
+    styles: ["Normal", "Heading1", "Heading2", "Heading3", "ListParagraph"] as Array<
+      "Normal" | "Heading1" | "Heading2" | "Heading3" | "ListParagraph"
+    >,
+    numbering,
+  };
 
   return {
-    kind: "wordOutputProjection",
-    target: "microsoftWord",
-    documentPlan: {
-      page: "letter",
-      styles: ["Normal", "Heading1", "Heading2", "Heading3", "ListParagraph"],
-      numbering,
-    },
-    paragraphs: graph.readingOrder.map((blockId) =>
-      blockToWordParagraph(blockById(graph, blockId)),
-    ),
+    kind: "ooxmlPartProjection",
+    target: "microsoftWordDocx",
+    documentPlan,
+    paragraphs,
+    parts: createOoxmlPartProjection(paragraphs),
   };
 }
 
-function blockToWordParagraph(block: SemanticBlock): OutputProjection["paragraphs"][number] {
+function blockToWordParagraph(block: SemanticBlock): WordParagraph {
   if (block.kind === "heading") {
     return {
       kind: "heading",
@@ -65,6 +82,57 @@ function blockToWordParagraph(block: SemanticBlock): OutputProjection["paragraph
     styleId: "Normal",
     runs: inlinesToRuns(block.inlines),
   };
+}
+
+function createOoxmlPartProjection(paragraphs: WordParagraph[]): OoxmlPartProjection[] {
+  return [
+    {
+      path: "[Content_Types].xml",
+      role: "contentTypes",
+      xml: contentTypesXml(),
+    },
+    {
+      path: "_rels/.rels",
+      role: "rootRelationships",
+      xml: rootRelationshipsXml(),
+    },
+    {
+      path: "docProps/core.xml",
+      role: "coreProperties",
+      contentType: "application/vnd.openxmlformats-package.core-properties+xml",
+      xml: corePropertiesTemplateXml(),
+    },
+    {
+      path: "docProps/app.xml",
+      role: "appProperties",
+      contentType: "application/vnd.openxmlformats-officedocument.extended-properties+xml",
+      xml: appPropertiesXml(),
+    },
+    {
+      path: "word/document.xml",
+      role: "document",
+      contentType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+      xml: documentXml(paragraphs),
+    },
+    {
+      path: "word/styles.xml",
+      role: "styles",
+      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml",
+      xml: stylesXml(),
+    },
+    {
+      path: "word/numbering.xml",
+      role: "numbering",
+      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml",
+      xml: numberingXml(),
+    },
+    {
+      path: "word/_rels/document.xml.rels",
+      role: "documentRelationships",
+      xml: documentRelationshipsXml(),
+    },
+  ];
 }
 
 function blockById(graph: SemanticAuthorGraph, blockId: string): SemanticBlock {

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vp dev",
     "build": "tsc && vp build",
+    "benchmark:docx": "bun run scripts/benchmark-docx-writers.ts",
     "preview": "vp preview",
     "prepare": "vp config"
   },

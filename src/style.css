@@ -243,15 +243,29 @@ h1 {
 
 .export-button {
   align-self: start;
-  margin-left: auto;
   border-color: var(--accent);
   color: #ffffff;
   background: var(--accent);
   font-weight: 700;
 }
 
+.export-button.secondary {
+  color: var(--app-chrome-dark);
+  background: #ffffff;
+}
+
 .export-button:hover {
   background: var(--app-chrome-dark);
+  color: #ffffff;
+}
+
+.export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: start;
+  gap: 6px;
+  min-width: 182px;
+  margin-left: auto;
 }
 
 .document-canvas {
@@ -427,6 +441,6 @@ h1 {
   }
 
   .export-button {
-    margin-left: 10px;
+    margin-left: 0;
   }
 }

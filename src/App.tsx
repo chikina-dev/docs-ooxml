@@ -97,8 +97,12 @@ export default function App() {
     setPipeline(createPipelineFromLexicalJson(editorState.toJSON()));
   }, []);
 
-  const handleExport = useCallback(() => {
-    downloadDocx(pipeline.outputProjection, title);
+  const handlePackageBufferExport = useCallback(() => {
+    downloadDocx(pipeline.outputProjection, title, "package-buffer");
+  }, [pipeline.outputProjection, title]);
+
+  const handleChunkedZipExport = useCallback(() => {
+    downloadDocx(pipeline.outputProjection, title, "chunked-zip");
   }, [pipeline.outputProjection, title]);
 
   return (
@@ -121,7 +125,10 @@ export default function App() {
         </header>
 
         <LexicalComposer initialConfig={initialConfig}>
-          <Toolbar onExport={handleExport} />
+          <Toolbar
+            onChunkedZipExport={handleChunkedZipExport}
+            onPackageBufferExport={handlePackageBufferExport}
+          />
           <div className="document-canvas">
             <div className="page-shadow">
               <div className="editor-frame">
@@ -146,7 +153,13 @@ export default function App() {
   );
 }
 
-function Toolbar({ onExport }: { onExport: () => void }) {
+function Toolbar({
+  onChunkedZipExport,
+  onPackageBufferExport,
+}: {
+  onChunkedZipExport: () => void;
+  onPackageBufferExport: () => void;
+}) {
   const [editor] = useLexicalComposerContext();
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -265,9 +278,14 @@ function Toolbar({ onExport }: { onExport: () => void }) {
           </div>
           <span className="ribbon-label">Paragraph</span>
         </div>
-        <button className="export-button" type="button" onClick={onExport}>
-          Export .docx
-        </button>
+        <div className="export-actions">
+          <button className="export-button" type="button" onClick={onPackageBufferExport}>
+            Export buffer
+          </button>
+          <button className="export-button secondary" type="button" onClick={onChunkedZipExport}>
+            Export chunked
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -339,17 +357,25 @@ function formatHeading(editor: LexicalEditor, level: HeadingLevel) {
   });
 }
 
-function downloadDocx(projection: OutputProjection, title: string) {
+function downloadDocx(
+  projection: OutputProjection,
+  title: string,
+  strategy: "package-buffer" | "chunked-zip",
+) {
   const safeTitle = slugifyFileName(title || "Untitled Document");
-  const blob = createDocxBlob(projection, {
-    title: title || "Untitled Document",
-    creator: "Docs OOXML",
-    createdAt: new Date(),
-  });
+  const blob = createDocxBlob(
+    projection,
+    {
+      title: title || "Untitled Document",
+      creator: "Docs OOXML",
+      createdAt: new Date(),
+    },
+    strategy,
+  );
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${safeTitle}.docx`;
+  link.download = `${safeTitle}-${strategy}.docx`;
   link.click();
   URL.revokeObjectURL(url);
 }

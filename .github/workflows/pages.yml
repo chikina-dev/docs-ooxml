@@ -26,6 +26,7 @@ jobs:
       - run: vp install --frozen-lockfile
       - run: vp check
       - run: vp test
+      - run: vp run benchmark:docx
       - run: vp build
       - uses: actions/upload-pages-artifact@v4
         with:

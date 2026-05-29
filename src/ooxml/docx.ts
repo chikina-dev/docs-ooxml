@@ -1,6 +1,6 @@
-import type { OutputProjection, WordParagraph, WordRun } from "../pipeline/types.ts";
-import { escapeXml, xmlDeclaration } from "./xml.ts";
-import { createZip, type ZipEntry } from "./zip.ts";
+import type { OoxmlPartProjection, OutputProjection } from "../pipeline/types.ts";
+import { corePropertiesXml } from "./parts.ts";
+import { createZip, createZipBlobParts, type ZipEntry } from "./zip.ts";
 
 export type DocxMetadata = {
   title: string;
@@ -8,9 +8,33 @@ export type DocxMetadata = {
   createdAt: Date;
 };
 
+export type DocxWriteStrategy = "package-buffer" | "chunked-zip";
+
+export type DocxBenchmarkResult = {
+  strategy: DocxWriteStrategy;
+  durationMs: number;
+  sizeBytes: number;
+  iterations: number;
+};
+
 const WORD_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-export function createDocxBlob(projection: OutputProjection, metadata: DocxMetadata): Blob {
+export function createDocxBlob(
+  projection: OutputProjection,
+  metadata: DocxMetadata,
+  strategy: DocxWriteStrategy = "package-buffer",
+): Blob {
+  if (strategy === "chunked-zip") {
+    return createDocxBlobChunkedZip(projection, metadata);
+  }
+
+  return createDocxBlobPackageBuffer(projection, metadata);
+}
+
+export function createDocxBlobPackageBuffer(
+  projection: OutputProjection,
+  metadata: DocxMetadata,
+): Blob {
   const zip = createZip(createDocxPackage(projection, metadata));
   const buffer = new ArrayBuffer(zip.byteLength);
   new Uint8Array(buffer).set(zip);
@@ -18,135 +42,50 @@ export function createDocxBlob(projection: OutputProjection, metadata: DocxMetad
   return new Blob([buffer], { type: WORD_MIME });
 }
 
+export function createDocxBlobChunkedZip(
+  projection: OutputProjection,
+  metadata: DocxMetadata,
+): Blob {
+  return new Blob(createZipBlobParts(createDocxPackage(projection, metadata)), { type: WORD_MIME });
+}
+
+export function benchmarkDocxWriters(
+  projection: OutputProjection,
+  metadata: DocxMetadata,
+  iterations = 50,
+  now: () => number = () => performance.now(),
+): DocxBenchmarkResult[] {
+  return (["package-buffer", "chunked-zip"] as const).map((strategy) => {
+    const start = now();
+    let sizeBytes = 0;
+
+    for (let index = 0; index < iterations; index += 1) {
+      sizeBytes = createDocxBlob(projection, metadata, strategy).size;
+    }
+
+    return {
+      strategy,
+      durationMs: now() - start,
+      sizeBytes,
+      iterations,
+    };
+  });
+}
+
 export function createDocxPackage(
   projection: OutputProjection,
   metadata: DocxMetadata,
 ): ZipEntry[] {
-  return [
-    { path: "[Content_Types].xml", data: contentTypesXml() },
-    { path: "_rels/.rels", data: rootRelationshipsXml() },
-    { path: "docProps/core.xml", data: corePropertiesXml(metadata) },
-    { path: "docProps/app.xml", data: appPropertiesXml() },
-    { path: "word/document.xml", data: documentXml(projection) },
-    { path: "word/styles.xml", data: stylesXml() },
-    { path: "word/numbering.xml", data: numberingXml() },
-    { path: "word/_rels/document.xml.rels", data: documentRelationshipsXml() },
-  ];
+  return projection.parts.map((part) => ({
+    path: part.path,
+    data: partXml(part, metadata),
+  }));
 }
 
-function contentTypesXml(): string {
-  return `${xmlDeclaration()}
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
-  <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
-</Types>`;
-}
-
-function rootRelationshipsXml(): string {
-  return `${xmlDeclaration()}
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
-</Relationships>`;
-}
-
-function documentRelationshipsXml(): string {
-  return `${xmlDeclaration()}
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>
-</Relationships>`;
-}
-
-function corePropertiesXml(metadata: DocxMetadata): string {
-  const createdAt = metadata.createdAt.toISOString();
-  return `${xmlDeclaration()}
-<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <dc:title>${escapeXml(metadata.title)}</dc:title>
-  <dc:creator>${escapeXml(metadata.creator)}</dc:creator>
-  <cp:lastModifiedBy>${escapeXml(metadata.creator)}</cp:lastModifiedBy>
-  <dcterms:created xsi:type="dcterms:W3CDTF">${createdAt}</dcterms:created>
-  <dcterms:modified xsi:type="dcterms:W3CDTF">${createdAt}</dcterms:modified>
-</cp:coreProperties>`;
-}
-
-function appPropertiesXml(): string {
-  return `${xmlDeclaration()}
-<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>Docs OOXML</Application>
-</Properties>`;
-}
-
-function documentXml(projection: OutputProjection): string {
-  const body = projection.paragraphs.map(paragraphXml).join("");
-  return `${xmlDeclaration()}
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>
-    ${body}
-    <w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>
-  </w:body>
-</w:document>`;
-}
-
-function paragraphXml(paragraph: WordParagraph): string {
-  return `<w:p>${paragraphPropertiesXml(paragraph)}${paragraph.runs.map(runXml).join("")}</w:p>`;
-}
-
-function paragraphPropertiesXml(paragraph: WordParagraph): string {
-  if (paragraph.kind === "heading") {
-    return `<w:pPr><w:pStyle w:val="${paragraph.styleId}"/></w:pPr>`;
+function partXml(part: OoxmlPartProjection, metadata: DocxMetadata): string {
+  if (part.role === "coreProperties") {
+    return corePropertiesXml(metadata);
   }
 
-  if (paragraph.kind === "listParagraph") {
-    return `<w:pPr><w:pStyle w:val="${paragraph.styleId}"/><w:numPr><w:ilvl w:val="${paragraph.numberingRef.level}"/><w:numId w:val="${paragraph.numberingRef.numId}"/></w:numPr></w:pPr>`;
-  }
-
-  return "";
-}
-
-function runXml(run: WordRun): string {
-  if (run.kind === "break") {
-    return "<w:r><w:br/></w:r>";
-  }
-
-  const properties = runPropertiesXml(run);
-  const space = /^\s|\s$/.test(run.text) ? ' xml:space="preserve"' : "";
-  return `<w:r>${properties}<w:t${space}>${escapeXml(run.text)}</w:t></w:r>`;
-}
-
-function runPropertiesXml(run: Extract<WordRun, { kind: "text" }>): string {
-  const marks = [
-    run.marks.bold ? "<w:b/>" : "",
-    run.marks.italic ? "<w:i/>" : "",
-    run.marks.underline ? '<w:u w:val="single"/>' : "",
-  ].join("");
-
-  return marks.length > 0 ? `<w:rPr>${marks}</w:rPr>` : "";
-}
-
-function stylesXml(): string {
-  return `${xmlDeclaration()}
-<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="480" w:after="120"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="360" w:after="120"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="240" w:after="120"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="34"/><w:qFormat/><w:pPr><w:ind w:left="720"/></w:pPr></w:style>
-</w:styles>`;
-}
-
-function numberingXml(): string {
-  return `${xmlDeclaration()}
-<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:abstractNum w:abstractNumId="1"><w:multiLevelType w:val="hybridMultilevel"/><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr></w:lvl></w:abstractNum>
-  <w:abstractNum w:abstractNumId="2"><w:multiLevelType w:val="hybridMultilevel"/><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr></w:lvl></w:abstractNum>
-  <w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
-  <w:num w:numId="2"><w:abstractNumId w:val="2"/></w:num>
-</w:numbering>`;
+  return part.xml;
 }
