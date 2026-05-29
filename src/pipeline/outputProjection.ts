@@ -1,20 +1,20 @@
+import type { TextMarks, HeadingLevel, ListKind } from "./authorTypes";
 import type {
-  HeadingLevel,
-  ListKind,
-  OoxmlPartProjectionList,
-  OoxmlTextTagOpen,
-  OutputProjection,
   SemanticAuthorGraph,
   SemanticBlockId,
   SemanticBlock,
   SemanticInline,
-  TextMarks,
+} from "./semanticTypes";
+import type {
+  OoxmlPartProjectionList,
+  OoxmlTextTagOpen,
+  OutputProjection,
   WordHeadingStyleId,
   WordNumberingId,
   WordParagraph,
   WordRun,
   WordStyleId,
-} from "./types";
+} from "./outputProjectionTypes";
 import { escapeXml } from "./xmlEscaping";
 
 const WORD_STYLES: readonly WordStyleId[] = [

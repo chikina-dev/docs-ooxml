@@ -1,13 +1,6 @@
-import {
-  createFflateStoreDocxBlob,
-  createFflateStreamDocxBlob,
-  createNaiveDocxBlob,
-  createOptimizedDocxBlob,
-  prepareDocxPackage,
-  type DocxWriteStrategy,
-} from "../src/ooxml/docx";
+import { createDocxBlob, DOCX_WRITERS, type DocxWriteStrategy } from "../src/ooxml/docx";
 import { createPipelineFromLexicalJson } from "../src/pipeline/createPipeline";
-import type { OutputProjection } from "../src/pipeline/types";
+import type { OutputProjection } from "../src/pipeline/outputProjectionTypes";
 
 type Scenario = {
   name: string;
@@ -60,7 +53,7 @@ const BENCHMARK_MODES: BenchmarkMode[] = [
   { name: "single-run", sampleCount: 21, iterationsForScenario: () => 1 },
   { name: "batch", sampleCount: 7, iterationsForScenario: (scenario) => scenario.iterations },
 ];
-const STRATEGIES: DocxWriteStrategy[] = ["naive", "optimized", "fflate-store", "fflate-stream"];
+const STRATEGIES = DOCX_WRITERS.map((writer) => writer.strategy);
 
 const metadata = {
   title: "GitHub Actions DOCX Writer Benchmark",
@@ -169,20 +162,7 @@ function runStrategy(
 }
 
 function createBlob(strategy: DocxWriteStrategy, projection: OutputProjection): Blob {
-  if (strategy === "naive") {
-    return createNaiveDocxBlob(projection, metadata);
-  }
-
-  if (strategy === "fflate-store") {
-    return createFflateStoreDocxBlob(projection, metadata);
-  }
-
-  if (strategy === "fflate-stream") {
-    return createFflateStreamDocxBlob(projection, metadata);
-  }
-
-  const preparedPackage = prepareDocxPackage(projection);
-  return createOptimizedDocxBlob(preparedPackage, metadata);
+  return createDocxBlob(projection, metadata, strategy);
 }
 
 function createLexicalFixture(scenario: Scenario, variant = 0) {

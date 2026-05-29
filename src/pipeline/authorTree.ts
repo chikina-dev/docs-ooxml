@@ -6,7 +6,7 @@ import type {
   HeadingLevel,
   ListKind,
   TextMarks,
-} from "./types";
+} from "./authorTypes";
 
 type LexicalTextFormat = number | string;
 type LexicalHeadingTag = "h1" | "h2" | "h3";

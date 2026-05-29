@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { createExportDocxCommand } from "./app/exportCommand";
 import { useAuthoringSession } from "./app/authoringSession";
 import { DocumentWorkspace } from "./components/DocumentWorkspace";
 import { PipelinePreview } from "./components/PipelinePreview";
@@ -8,11 +9,8 @@ export default function App() {
   const { commands, snapshot } = useAuthoringSession();
 
   const handleExport = useCallback(() => {
-    downloadDocx({
-      title: snapshot.title,
-      projection: snapshot.pipeline.outputProjection,
-    });
-  }, [snapshot.pipeline.outputProjection, snapshot.title]);
+    downloadDocx(createExportDocxCommand(snapshot));
+  }, [snapshot]);
 
   return (
     <main className="app-shell">

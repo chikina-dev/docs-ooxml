@@ -5,7 +5,7 @@ import type {
   OoxmlPartProjection,
   OutputProjection,
   StaticOoxmlPartProjection,
-} from "../pipeline/types";
+} from "../pipeline/outputProjectionTypes";
 import { strToU8, Zip, ZipPassThrough, zipSync, type Zippable } from "fflate";
 import {
   appPropertiesXml,
@@ -40,6 +40,16 @@ export type PreparedDocxPackage = {
   stableEntries: readonly StoredZipEntry<OoxmlPackagePath>[];
 };
 
+export type DocxWriter = {
+  strategy: DocxWriteStrategy;
+  createBlob: (projection: OutputProjection, metadata: DocxMetadata) => Blob;
+  createBenchmarkBlob?: (
+    projection: OutputProjection,
+    metadata: DocxMetadata,
+    preparedPackage: PreparedDocxPackage,
+  ) => Blob;
+};
+
 export type DocxBenchmarkResult = {
   strategy: DocxWriteStrategy;
   durationMs: number;
@@ -50,11 +60,27 @@ export type DocxBenchmarkResult = {
 type StaticPartRole = StaticOoxmlPartProjection["role"];
 
 const WORD_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const DOCX_WRITE_STRATEGIES: readonly DocxWriteStrategy[] = [
-  "naive",
-  "optimized",
-  "fflate-store",
-  "fflate-stream",
+export const DEFAULT_DOCX_WRITE_STRATEGY: DocxWriteStrategy = "fflate-store";
+export const DOCX_WRITERS: readonly DocxWriter[] = [
+  {
+    strategy: "naive",
+    createBlob: createNaiveDocxBlob,
+  },
+  {
+    strategy: "optimized",
+    createBlob: (projection, metadata) =>
+      createOptimizedDocxBlob(prepareDocxPackage(projection), metadata),
+    createBenchmarkBlob: (_projection, metadata, preparedPackage) =>
+      createOptimizedDocxBlob(preparedPackage, metadata),
+  },
+  {
+    strategy: "fflate-store",
+    createBlob: createFflateStoreDocxBlob,
+  },
+  {
+    strategy: "fflate-stream",
+    createBlob: createFflateStreamDocxBlob,
+  },
 ];
 const FFLATE_MTIME = new Date("1980-01-01T00:00:00.000Z");
 const FFLATE_STORE_OPTIONS: { readonly level: 0; readonly mtime: Date } = {
@@ -77,21 +103,9 @@ const STATIC_ENTRY_BY_ROLE: Record<StaticPartRole, StoredZipEntry<OoxmlPackagePa
 export function createDocxBlob(
   projection: OutputProjection,
   metadata: DocxMetadata,
-  strategy: DocxWriteStrategy = "fflate-store",
+  strategy: DocxWriteStrategy = DEFAULT_DOCX_WRITE_STRATEGY,
 ): Blob {
-  if (strategy === "naive") {
-    return createNaiveDocxBlob(projection, metadata);
-  }
-
-  if (strategy === "fflate-store") {
-    return createFflateStoreDocxBlob(projection, metadata);
-  }
-
-  if (strategy === "fflate-stream") {
-    return createFflateStreamDocxBlob(projection, metadata);
-  }
-
-  return createOptimizedDocxBlob(prepareDocxPackage(projection), metadata);
+  return docxWriterForStrategy(strategy).createBlob(projection, metadata);
 }
 
 export function prepareDocxPackage(projection: OutputProjection): PreparedDocxPackage {
@@ -151,28 +165,34 @@ export function benchmarkDocxWriters(
 ): DocxBenchmarkResult[] {
   const preparedPackage = prepareDocxPackage(projection);
 
-  return DOCX_WRITE_STRATEGIES.map((strategy) => {
+  return DOCX_WRITERS.map((writer) => {
     const start = now();
     let sizeBytes = 0;
 
     for (let index = 0; index < iterations; index += 1) {
-      sizeBytes =
-        strategy === "naive"
-          ? createNaiveDocxBlob(projection, metadata).size
-          : strategy === "optimized"
-            ? createOptimizedDocxBlob(preparedPackage, metadata).size
-            : strategy === "fflate-store"
-              ? createFflateStoreDocxBlob(projection, metadata).size
-              : createFflateStreamDocxBlob(projection, metadata).size;
+      sizeBytes = (writer.createBenchmarkBlob ?? writer.createBlob)(
+        projection,
+        metadata,
+        preparedPackage,
+      ).size;
     }
 
     return {
-      strategy,
+      strategy: writer.strategy,
       durationMs: now() - start,
       sizeBytes,
       iterations,
     };
   });
+}
+
+export function docxWriterForStrategy(strategy: DocxWriteStrategy): DocxWriter {
+  const writer = DOCX_WRITERS.find((candidate) => candidate.strategy === strategy);
+  if (!writer) {
+    throw new Error(`Unknown DOCX write strategy: ${strategy}`);
+  }
+
+  return writer;
 }
 
 export function createDocxPackage(

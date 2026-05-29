@@ -4,6 +4,8 @@ import type {
   AuthorSourcePath,
   AuthorTree,
   HeadingLevel,
+} from "./authorTypes";
+import type {
   SemanticAuthorGraph,
   SemanticBlock,
   SemanticBlockId,
@@ -12,7 +14,7 @@ import type {
   SemanticListGroupId,
   SemanticSectionId,
   SemanticSection,
-} from "./types";
+} from "./semanticTypes";
 
 type BuildState = {
   nextBlockId: number;

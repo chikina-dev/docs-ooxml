@@ -1,4 +1,4 @@
-import type { WordParagraph, WordRun } from "../pipeline/types";
+import type { WordParagraph, WordRun } from "../pipeline/outputProjectionTypes";
 import { escapeXml, xmlDeclaration } from "./xml";
 
 export type CorePropertiesValues = {
