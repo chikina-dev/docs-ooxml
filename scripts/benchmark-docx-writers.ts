@@ -14,16 +14,24 @@ type Scenario = {
   iterations: number;
 };
 
+type BenchmarkMode = {
+  name: "single-run" | "batch";
+  sampleCount: number;
+  iterationsForScenario: (scenario: Scenario) => number;
+};
+
 type Sample = {
   durationMs: number;
   sizeBytes: number;
 };
 
 type Row = {
+  mode: BenchmarkMode["name"];
   scenario: string;
   paragraphs: number;
   listItems: number;
   strategy: DocxWriteStrategy;
+  samples: number;
   iterations: number;
   medianAvgMs: number;
   minAvgMs: number;
@@ -46,7 +54,10 @@ const SCENARIOS: Scenario[] = [
   { name: "large", paragraphs: 1000, listItems: 120, iterations: 15 },
 ];
 
-const SAMPLE_COUNT = 7;
+const BENCHMARK_MODES: BenchmarkMode[] = [
+  { name: "single-run", sampleCount: 21, iterationsForScenario: () => 1 },
+  { name: "batch", sampleCount: 7, iterationsForScenario: (scenario) => scenario.iterations },
+];
 const STRATEGIES: DocxWriteStrategy[] = ["naive", "optimized"];
 
 const metadata = {
@@ -55,51 +66,57 @@ const metadata = {
   createdAt: new Date("2026-05-29T00:00:00.000Z"),
 };
 
-const rows = SCENARIOS.flatMap((scenario) => {
+const rows = BENCHMARK_MODES.flatMap((mode) =>
+  SCENARIOS.flatMap((scenario) => benchmarkScenario(mode, scenario)),
+);
+
+function benchmarkScenario(mode: BenchmarkMode, scenario: Scenario): Row[] {
+  const iterations = mode.iterationsForScenario(scenario);
   const samples = new Map<DocxWriteStrategy, Sample[]>(
     STRATEGIES.map((strategy) => [strategy, []]),
   );
 
   for (const strategy of STRATEGIES) {
-    runStrategy(strategy, scenario, 3, 0);
+    runStrategy(strategy, scenario, iterations, 0);
   }
 
-  for (let sampleIndex = 0; sampleIndex < SAMPLE_COUNT; sampleIndex += 1) {
+  for (let sampleIndex = 0; sampleIndex < mode.sampleCount; sampleIndex += 1) {
     const order = sampleIndex % 2 === 0 ? STRATEGIES : [...STRATEGIES].reverse();
     for (const strategy of order) {
       samples
         .get(strategy)
-        ?.push(
-          runStrategy(strategy, scenario, scenario.iterations, sampleIndex * scenario.iterations),
-        );
+        ?.push(runStrategy(strategy, scenario, iterations, sampleIndex * iterations));
     }
   }
 
   return STRATEGIES.map((strategy): Row => {
     const strategySamples = samples.get(strategy) ?? [];
-    const averages = strategySamples.map((sample) => sample.durationMs / scenario.iterations);
+    const averages = strategySamples.map((sample) => sample.durationMs / iterations);
     return {
+      mode: mode.name,
       scenario: scenario.name,
       paragraphs: scenario.paragraphs,
       listItems: scenario.listItems,
       strategy,
-      iterations: scenario.iterations,
+      samples: mode.sampleCount,
+      iterations,
       medianAvgMs: median(averages),
       minAvgMs: Math.min(...averages),
       maxAvgMs: Math.max(...averages),
       sizeBytes: strategySamples.at(-1)?.sizeBytes ?? 0,
     };
   });
-});
+}
 
 const table = [
-  "| Scenario | Paragraphs | List Items | Strategy | Iterations/sample | Median avg ms/run | Min-Max avg | vs naive | DOCX size |",
-  "| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
+  "| Mode | Scenario | Paragraphs | List Items | Strategy | Samples | Iterations/sample | Median avg ms/run | Min-Max avg | vs naive | DOCX size |",
+  "| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
   ...rows.map((row) => {
     const baseline = rows.find(
-      (item) => item.scenario === row.scenario && item.strategy === "naive",
+      (item) =>
+        item.mode === row.mode && item.scenario === row.scenario && item.strategy === "naive",
     );
-    return `| ${row.scenario} | ${row.paragraphs} | ${row.listItems} | ${row.strategy} | ${row.iterations} | ${row.medianAvgMs.toFixed(4)} | ${row.minAvgMs.toFixed(4)}-${row.maxAvgMs.toFixed(4)} | ${formatRelative(row, baseline)} | ${formatBytes(row.sizeBytes)} |`;
+    return `| ${row.mode} | ${row.scenario} | ${row.paragraphs} | ${row.listItems} | ${row.strategy} | ${row.samples} | ${row.iterations} | ${row.medianAvgMs.toFixed(4)} | ${row.minAvgMs.toFixed(4)}-${row.maxAvgMs.toFixed(4)} | ${formatRelative(row, baseline)} | ${formatBytes(row.sizeBytes)} |`;
   }),
 ].join("\n");
 
@@ -107,9 +124,9 @@ const summary = `## DOCX Writer Benchmark
 
 Measured in GitHub Actions with Bun on \`ubuntu-latest\`.
 
-This benchmark compares a deliberately naive writer against an optimized writer while generating a fresh Output Projection for every iteration. \`naive\` rebuilds XML strings as package entries, re-encodes each part, computes CRCs, creates many small ZIP buffers, and concatenates them. \`optimized\` prepares each fresh projection, reuses only projection-independent static OOXML parts, and writes the ZIP into one preallocated buffer.
+This benchmark compares a deliberately naive writer against an optimized writer. Each measured iteration packages a different pre-generated Output Projection, so the writer never packages the same projection twice. \`single-run\` measures one package operation per sample; \`batch\` measures repeated packaging in one sample. \`naive\` materializes every OOXML part, re-encodes each part, computes CRCs, creates many small ZIP buffers, and concatenates them. \`optimized\` materializes only dynamic parts per projection, uses module-eager static OOXML entries from the first writer call, and writes the ZIP into one preallocated buffer.
 
-Each row reports the median of ${SAMPLE_COUNT} samples. Each sample performs the listed number of writer iterations.
+Each row reports the median of its listed sample count. Each sample performs the listed number of writer iterations.
 
 ${table}
 `;
@@ -127,14 +144,20 @@ function runStrategy(
   iterations: number,
   variantOffset: number,
 ): Sample {
+  const projections = Array.from(
+    { length: iterations },
+    (_, index) =>
+      createPipelineFromLexicalJson(createLexicalFixture(scenario, variantOffset + index))
+        .outputProjection,
+  );
   const start = performance.now();
   let sizeBytes = 0;
 
   for (let index = 0; index < iterations; index += 1) {
-    const projection = createPipelineFromLexicalJson(
-      createLexicalFixture(scenario, variantOffset + index),
-    ).outputProjection;
-    sizeBytes = createBlob(strategy, projection).size;
+    const projection = projections[index];
+    if (projection) {
+      sizeBytes = createBlob(strategy, projection).size;
+    }
   }
 
   return {

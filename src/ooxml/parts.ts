@@ -7,6 +7,23 @@ export type CorePropertiesValues = {
   createdAt: Date;
 };
 
+const HEADING_PARAGRAPH_PROPERTIES = {
+  Heading1: '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>',
+  Heading2: '<w:pPr><w:pStyle w:val="Heading2"/></w:pPr>',
+  Heading3: '<w:pPr><w:pStyle w:val="Heading3"/></w:pPr>',
+};
+
+const RUN_PROPERTIES_BY_MARK_MASK = [
+  "",
+  "<w:rPr><w:b/></w:rPr>",
+  "<w:rPr><w:i/></w:rPr>",
+  "<w:rPr><w:b/><w:i/></w:rPr>",
+  '<w:rPr><w:u w:val="single"/></w:rPr>',
+  '<w:rPr><w:b/><w:u w:val="single"/></w:rPr>',
+  '<w:rPr><w:i/><w:u w:val="single"/></w:rPr>',
+  '<w:rPr><w:b/><w:i/><w:u w:val="single"/></w:rPr>',
+];
+
 export function contentTypesXml(): string {
   return `${xmlDeclaration()}
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -64,7 +81,7 @@ export function appPropertiesXml(): string {
 </Properties>`;
 }
 
-export function documentXml(paragraphs: WordParagraph[]): string {
+export function documentXml(paragraphs: readonly WordParagraph[]): string {
   const body = paragraphs.map(paragraphXml).join("");
   return `${xmlDeclaration()}
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -73,6 +90,26 @@ export function documentXml(paragraphs: WordParagraph[]): string {
     <w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>
   </w:body>
 </w:document>`;
+}
+
+export function documentXmlOptimized(paragraphs: readonly WordParagraph[]): string {
+  const chunks: string[] = [
+    `${xmlDeclaration()}
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    `,
+  ];
+
+  for (const paragraph of paragraphs) {
+    pushParagraphXml(chunks, paragraph);
+  }
+
+  chunks.push(`
+    <w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>
+  </w:body>
+</w:document>`);
+
+  return chunks.join("");
 }
 
 export function stylesXml(): string {
@@ -130,4 +167,63 @@ function runPropertiesXml(run: Extract<WordRun, { kind: "text" }>): string {
   ].join("");
 
   return marks.length > 0 ? `<w:rPr>${marks}</w:rPr>` : "";
+}
+
+function pushParagraphXml(chunks: string[], paragraph: WordParagraph): void {
+  chunks.push("<w:p>", paragraphPropertiesXmlOptimized(paragraph));
+
+  for (const run of paragraph.runs) {
+    pushRunXml(chunks, run);
+  }
+
+  chunks.push("</w:p>");
+}
+
+function pushRunXml(chunks: string[], run: WordRun): void {
+  if (run.kind === "break") {
+    chunks.push("<w:r><w:br/></w:r>");
+    return;
+  }
+
+  chunks.push("<w:r>", runPropertiesXmlOptimized(run));
+  chunks.push(shouldPreserveXmlSpace(run.text) ? '<w:t xml:space="preserve">' : "<w:t>");
+  chunks.push(escapeXml(run.text), "</w:t></w:r>");
+}
+
+function runPropertiesXmlOptimized(run: Extract<WordRun, { kind: "text" }>): string {
+  return RUN_PROPERTIES_BY_MARK_MASK[textMarkMask(run)] ?? "";
+}
+
+function shouldPreserveXmlSpace(value: string): boolean {
+  return /^\s|\s$/.test(value);
+}
+
+function paragraphPropertiesXmlOptimized(paragraph: WordParagraph): string {
+  if (paragraph.kind === "heading") {
+    return HEADING_PARAGRAPH_PROPERTIES[paragraph.styleId];
+  }
+
+  if (paragraph.kind === "listParagraph") {
+    return `<w:pPr><w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="${paragraph.numberingRef.level}"/><w:numId w:val="${paragraph.numberingRef.numId}"/></w:numPr></w:pPr>`;
+  }
+
+  return "";
+}
+
+function textMarkMask(run: Extract<WordRun, { kind: "text" }>): number {
+  let mask = 0;
+
+  if (run.marks.bold) {
+    mask |= 1;
+  }
+
+  if (run.marks.italic) {
+    mask |= 2;
+  }
+
+  if (run.marks.underline) {
+    mask |= 4;
+  }
+
+  return mask;
 }

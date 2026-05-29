@@ -6,7 +6,17 @@ import type {
   OutputProjection,
   StaticOoxmlPartProjection,
 } from "../pipeline/types";
-import { corePropertiesXml } from "./parts";
+import {
+  appPropertiesXml,
+  contentTypesXml,
+  corePropertiesXml,
+  documentRelationshipsXml,
+  documentXml,
+  documentXmlOptimized,
+  numberingXml,
+  rootRelationshipsXml,
+  stylesXml,
+} from "./parts";
 import {
   createStoredZipEntry,
   createZipFromStoredEntries,
@@ -35,9 +45,21 @@ export type DocxBenchmarkResult = {
   iterations: number;
 };
 
+type StaticPartRole = StaticOoxmlPartProjection["role"];
+
 const WORD_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const staticEntryCache = new Map<OoxmlPackagePath, StoredZipEntry<OoxmlPackagePath>>();
 const DOCX_WRITE_STRATEGIES: readonly DocxWriteStrategy[] = ["naive", "optimized"];
+const STATIC_ENTRY_BY_ROLE: Record<StaticPartRole, StoredZipEntry<OoxmlPackagePath>> = {
+  contentTypes: createStoredZipEntry("[Content_Types].xml", contentTypesXml()),
+  rootRelationships: createStoredZipEntry("_rels/.rels", rootRelationshipsXml()),
+  appProperties: createStoredZipEntry("docProps/app.xml", appPropertiesXml()),
+  styles: createStoredZipEntry("word/styles.xml", stylesXml()),
+  numbering: createStoredZipEntry("word/numbering.xml", numberingXml()),
+  documentRelationships: createStoredZipEntry(
+    "word/_rels/document.xml.rels",
+    documentRelationshipsXml(),
+  ),
+};
 
 export function createDocxBlob(
   projection: OutputProjection,
@@ -57,7 +79,9 @@ export function prepareDocxPackage(projection: OutputProjection): PreparedDocxPa
     stableEntries: projection.parts
       .filter((part) => !isCorePropertiesPart(part))
       .map((part) =>
-        isDocumentPart(part) ? createStoredZipEntry(part.path, part.xml) : storedStaticEntry(part),
+        isDocumentPart(part)
+          ? createStoredZipEntry(part.path, documentXmlOptimized(part.paragraphs))
+          : storedStaticEntry(part),
       ),
   };
 }
@@ -123,7 +147,11 @@ function partXml(part: OoxmlPartProjection, metadata: DocxMetadata): string {
     return corePropertiesXml(metadata);
   }
 
-  return part.xml;
+  if (part.role === "document") {
+    return documentXml(part.paragraphs);
+  }
+
+  return staticPartXml(part);
 }
 
 function isCorePropertiesPart(part: OoxmlPartProjection): part is CorePropertiesPartProjection {
@@ -135,12 +163,22 @@ function isDocumentPart(part: OoxmlPartProjection): part is DocumentPartProjecti
 }
 
 function storedStaticEntry(part: StaticOoxmlPartProjection): StoredZipEntry<OoxmlPackagePath> {
-  const cached = staticEntryCache.get(part.path);
-  if (cached) {
-    return cached;
-  }
+  return STATIC_ENTRY_BY_ROLE[part.role];
+}
 
-  const entry = createStoredZipEntry(part.path, part.xml);
-  staticEntryCache.set(part.path, entry);
-  return entry;
+function staticPartXml(part: StaticOoxmlPartProjection): string {
+  switch (part.role) {
+    case "contentTypes":
+      return contentTypesXml();
+    case "rootRelationships":
+      return rootRelationshipsXml();
+    case "appProperties":
+      return appPropertiesXml();
+    case "styles":
+      return stylesXml();
+    case "numbering":
+      return numberingXml();
+    case "documentRelationships":
+      return documentRelationshipsXml();
+  }
 }

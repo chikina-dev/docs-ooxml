@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { createPipelineFromLexicalJson } from "../pipeline/createPipeline";
 import { benchmarkDocxWriters, createDocxBlob, createDocxPackage } from "./docx";
+import { documentXml, documentXmlOptimized } from "./parts";
 import { escapeXml } from "./xml";
 import { crc32, createZipNaive, createZipOptimized, listZipEntries } from "./zip";
 
@@ -80,6 +81,19 @@ describe("OOXML writer", () => {
       "word/numbering.xml",
       "word/_rels/document.xml.rels",
     ]);
+  });
+
+  it("keeps optimized document XML equivalent to the naive document XML", () => {
+    const documentPart = projection.parts.find((part) => part.role === "document");
+
+    expect(documentPart?.role).toBe("document");
+    if (documentPart?.role !== "document") {
+      return;
+    }
+
+    expect(documentXmlOptimized(documentPart.paragraphs)).toBe(
+      documentXml(documentPart.paragraphs),
+    );
   });
 
   it("writes equivalent uncompressed zips with naive and optimized writers", () => {

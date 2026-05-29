@@ -13,16 +13,6 @@ import type {
   WordRun,
   WordStyleId,
 } from "./types";
-import {
-  appPropertiesXml,
-  contentTypesXml,
-  corePropertiesTemplateXml,
-  documentRelationshipsXml,
-  documentXml,
-  numberingXml,
-  rootRelationshipsXml,
-  stylesXml,
-} from "../ooxml/parts";
 
 const WORD_STYLES: readonly WordStyleId[] = [
   "Normal",
@@ -38,8 +28,9 @@ export function semanticGraphToOutputProjection(graph: SemanticAuthorGraph): Out
     listKind: listGroup.listKind,
     numId: numberingIdForListKind(listGroup.listKind),
   }));
+  const blocksById = new Map(graph.blocks.map((block) => [block.id, block]));
   const paragraphs = graph.readingOrder.map((blockId) =>
-    blockToWordParagraph(blockById(graph, blockId)),
+    blockToWordParagraph(blockById(blocksById, blockId)),
   );
   const documentPlan: OutputProjection["documentPlan"] = {
     page: "letter",
@@ -101,54 +92,58 @@ function createOoxmlPartProjection(paragraphs: WordParagraph[]): OoxmlPartProjec
     {
       path: "[Content_Types].xml",
       role: "contentTypes",
-      xml: contentTypesXml(),
+      source: "staticXml",
     },
     {
       path: "_rels/.rels",
       role: "rootRelationships",
-      xml: rootRelationshipsXml(),
+      source: "staticXml",
     },
     {
       path: "docProps/core.xml",
       role: "coreProperties",
       contentType: "application/vnd.openxmlformats-package.core-properties+xml",
-      xml: corePropertiesTemplateXml(),
+      source: "metadata",
     },
     {
       path: "docProps/app.xml",
       role: "appProperties",
       contentType: "application/vnd.openxmlformats-officedocument.extended-properties+xml",
-      xml: appPropertiesXml(),
+      source: "staticXml",
     },
     {
       path: "word/document.xml",
       role: "document",
       contentType:
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
-      xml: documentXml(paragraphs),
+      source: "wordParagraphs",
+      paragraphs,
     },
     {
       path: "word/styles.xml",
       role: "styles",
       contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml",
-      xml: stylesXml(),
+      source: "staticXml",
     },
     {
       path: "word/numbering.xml",
       role: "numbering",
       contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml",
-      xml: numberingXml(),
+      source: "staticXml",
     },
     {
       path: "word/_rels/document.xml.rels",
       role: "documentRelationships",
-      xml: documentRelationshipsXml(),
+      source: "staticXml",
     },
   ] satisfies OoxmlPartProjectionList;
 }
 
-function blockById(graph: SemanticAuthorGraph, blockId: SemanticBlockId): SemanticBlock {
-  const block = graph.blocks.find((item) => item.id === blockId);
+function blockById(
+  blocksById: ReadonlyMap<SemanticBlockId, SemanticBlock>,
+  blockId: SemanticBlockId,
+): SemanticBlock {
+  const block = blocksById.get(blockId);
   if (!block) {
     throw new Error(`Output projection could not find semantic block ${blockId}`);
   }

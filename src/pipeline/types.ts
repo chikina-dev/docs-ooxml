@@ -204,56 +204,57 @@ export type ContentTypesPartProjection = {
   path: "[Content_Types].xml";
   role: "contentTypes";
   contentType?: never;
-  xml: string;
+  source: "staticXml";
 };
 
 export type RootRelationshipsPartProjection = {
   path: "_rels/.rels";
   role: "rootRelationships";
   contentType?: never;
-  xml: string;
+  source: "staticXml";
 };
 
 export type CorePropertiesPartProjection = {
   path: "docProps/core.xml";
   role: "coreProperties";
   contentType: "application/vnd.openxmlformats-package.core-properties+xml";
-  xml: string;
+  source: "metadata";
 };
 
 export type AppPropertiesPartProjection = {
   path: "docProps/app.xml";
   role: "appProperties";
   contentType: "application/vnd.openxmlformats-officedocument.extended-properties+xml";
-  xml: string;
+  source: "staticXml";
 };
 
 export type DocumentPartProjection = {
   path: "word/document.xml";
   role: "document";
   contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml";
-  xml: string;
+  source: "wordParagraphs";
+  paragraphs: readonly WordParagraph[];
 };
 
 export type StylesPartProjection = {
   path: "word/styles.xml";
   role: "styles";
   contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml";
-  xml: string;
+  source: "staticXml";
 };
 
 export type NumberingPartProjection = {
   path: "word/numbering.xml";
   role: "numbering";
   contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml";
-  xml: string;
+  source: "staticXml";
 };
 
 export type DocumentRelationshipsPartProjection = {
   path: "word/_rels/document.xml.rels";
   role: "documentRelationships";
   contentType?: never;
-  xml: string;
+  source: "staticXml";
 };
 
 export type OoxmlPartProjection =
