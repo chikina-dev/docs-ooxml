@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { createPipelineFromLexicalJson } from "../pipeline/createPipeline";
+import { unzipSync } from "fflate";
 import { benchmarkDocxWriters, createDocxBlob, createDocxPackage } from "./docx";
 import { documentXml, documentXmlOptimized } from "./parts";
 import { escapeXml } from "./xml";
@@ -51,6 +52,39 @@ describe("OOXML writer", () => {
         { path: "word/numbering.xml", role: "numbering" },
         { path: "word/_rels/document.xml.rels", role: "documentRelationships" },
       ],
+    });
+  });
+
+  it("projects OOXML-ready paragraph and run fragments", () => {
+    expect(projection.paragraphs[0]).toMatchObject({
+      kind: "heading",
+      ooxml: {
+        paragraphPropertiesXml: '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>',
+      },
+      runs: [
+        {
+          kind: "text",
+          ooxml: {
+            runPropertiesXml: "<w:rPr><w:b/></w:rPr>",
+            textTagOpen: "<w:t>",
+            escapedText: "Title &amp; Intro",
+          },
+        },
+      ],
+    });
+    expect(projection.paragraphs[1]?.runs[0]).toMatchObject({
+      kind: "text",
+      ooxml: {
+        runPropertiesXml: '<w:rPr><w:i/><w:u w:val="single"/></w:rPr>',
+        escapedText: "Hello &lt;world&gt;",
+      },
+    });
+    expect(projection.paragraphs[2]).toMatchObject({
+      kind: "listParagraph",
+      ooxml: {
+        paragraphPropertiesXml:
+          '<w:pPr><w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>',
+      },
     });
   });
 
@@ -110,20 +144,30 @@ describe("OOXML writer", () => {
     expect(optimizedZip.at(-22)).toBe(0x50);
   });
 
-  it("emits Word blobs with both writer strategies", async () => {
+  it("emits Word blobs with all writer strategies", async () => {
     const naiveBlob = createDocxBlob(projection, metadata, "naive");
     const optimizedBlob = createDocxBlob(projection, metadata, "optimized");
-    const bytes = new Uint8Array(await optimizedBlob.arrayBuffer());
+    const fflateBlob = createDocxBlob(projection, metadata, "fflate-store");
+    const fflateStreamBlob = createDocxBlob(projection, metadata, "fflate-stream");
+    const optimizedBytes = new Uint8Array(await optimizedBlob.arrayBuffer());
+    const fflateBytes = new Uint8Array(await fflateBlob.arrayBuffer());
+    const fflateStreamBytes = new Uint8Array(await fflateStreamBlob.arrayBuffer());
 
     expect(naiveBlob.type).toBe(
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     );
     expect(naiveBlob.size).toBe(optimizedBlob.size);
-    expect(listZipEntries(bytes)).toContain("word/document.xml");
-    expect(listZipEntries(bytes)).toContain("word/numbering.xml");
+    expect(fflateBlob.type).toBe(naiveBlob.type);
+    expect(fflateStreamBlob.type).toBe(naiveBlob.type);
+    expect(listZipEntries(optimizedBytes)).toContain("word/document.xml");
+    expect(listZipEntries(optimizedBytes)).toContain("word/numbering.xml");
+    expect(listZipEntries(fflateBytes)).toContain("word/document.xml");
+    expect(listZipEntries(fflateBytes)).toContain("word/numbering.xml");
+    expect(Object.keys(unzipSync(fflateStreamBytes))).toContain("word/document.xml");
+    expect(Object.keys(unzipSync(fflateStreamBytes))).toContain("word/numbering.xml");
   });
 
-  it("benchmarks both docx writer strategies", () => {
+  it("benchmarks all docx writer strategies", () => {
     let time = 0;
     const results = benchmarkDocxWriters(projection, metadata, 2, () => {
       time += 3;
@@ -133,6 +177,8 @@ describe("OOXML writer", () => {
     expect(results).toEqual([
       { strategy: "naive", durationMs: 3, sizeBytes: expect.any(Number), iterations: 2 },
       { strategy: "optimized", durationMs: 3, sizeBytes: expect.any(Number), iterations: 2 },
+      { strategy: "fflate-store", durationMs: 3, sizeBytes: expect.any(Number), iterations: 2 },
+      { strategy: "fflate-stream", durationMs: 3, sizeBytes: expect.any(Number), iterations: 2 },
     ]);
   });
 });

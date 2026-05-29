@@ -19,6 +19,10 @@ export type WordHeadingStyleId = "Heading1" | "Heading2" | "Heading3";
 export type WordListStyleId = "ListParagraph";
 export type WordStyleId = WordBodyStyleId | WordHeadingStyleId | WordListStyleId;
 export type WordNumberingId = 1 | 2;
+export type OoxmlTextTagOpen = "<w:t>" | '<w:t xml:space="preserve">';
+export type WordParagraphOoxml = {
+  paragraphPropertiesXml: string;
+};
 
 export type AuthorInline =
   | {
@@ -136,9 +140,17 @@ export type WordRun =
       kind: "text";
       text: string;
       marks: TextMarks;
+      ooxml: {
+        runPropertiesXml: string;
+        textTagOpen: OoxmlTextTagOpen;
+        escapedText: string;
+      };
     }
   | {
       kind: "break";
+      ooxml: {
+        runXml: "<w:r><w:br/></w:r>";
+      };
     };
 
 export type WordParagraph =
@@ -148,6 +160,7 @@ export type WordParagraph =
       sectionId: SemanticSectionId;
       semanticRole: "body";
       styleId: WordBodyStyleId;
+      ooxml: WordParagraphOoxml;
       runs: WordRun[];
     }
   | {
@@ -156,6 +169,7 @@ export type WordParagraph =
       sectionId: SemanticSectionId;
       semanticRole: "sectionHeading";
       styleId: WordHeadingStyleId;
+      ooxml: WordParagraphOoxml;
       runs: WordRun[];
     }
   | {
@@ -171,6 +185,7 @@ export type WordParagraph =
         numId: WordNumberingId;
       };
       level: number;
+      ooxml: WordParagraphOoxml;
       runs: WordRun[];
     };
 

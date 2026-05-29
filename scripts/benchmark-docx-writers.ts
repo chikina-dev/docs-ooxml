@@ -1,4 +1,6 @@
 import {
+  createFflateStoreDocxBlob,
+  createFflateStreamDocxBlob,
   createNaiveDocxBlob,
   createOptimizedDocxBlob,
   prepareDocxPackage,
@@ -58,7 +60,7 @@ const BENCHMARK_MODES: BenchmarkMode[] = [
   { name: "single-run", sampleCount: 21, iterationsForScenario: () => 1 },
   { name: "batch", sampleCount: 7, iterationsForScenario: (scenario) => scenario.iterations },
 ];
-const STRATEGIES: DocxWriteStrategy[] = ["naive", "optimized"];
+const STRATEGIES: DocxWriteStrategy[] = ["naive", "optimized", "fflate-store", "fflate-stream"];
 
 const metadata = {
   title: "GitHub Actions DOCX Writer Benchmark",
@@ -124,7 +126,7 @@ const summary = `## DOCX Writer Benchmark
 
 Measured in GitHub Actions with Bun on \`ubuntu-latest\`.
 
-This benchmark compares a deliberately naive writer against an optimized writer. Each measured iteration packages a different pre-generated Output Projection, so the writer never packages the same projection twice. \`single-run\` measures one package operation per sample; \`batch\` measures repeated packaging in one sample. \`naive\` materializes every OOXML part, re-encodes each part, computes CRCs, creates many small ZIP buffers, and concatenates them. \`optimized\` materializes only dynamic parts per projection, uses module-eager static OOXML entries from the first writer call, and writes the ZIP into one preallocated buffer.
+This benchmark compares a deliberately naive writer, the manual optimized writer, and fflate-backed store writers. Each measured iteration packages a different pre-generated Output Projection, so the writer never packages the same projection twice. \`single-run\` measures one package operation per sample; \`batch\` measures repeated packaging in one sample. \`naive\` materializes every OOXML part, re-encodes each part, computes CRCs, creates many small ZIP buffers, and concatenates them. \`optimized\` materializes only dynamic parts per projection, uses module-eager static OOXML entries from the first writer call, and writes the ZIP into one preallocated buffer. \`fflate-store\` uses fflate \`zipSync\` with compression disabled. \`fflate-stream\` writes \`document.xml\` in XML chunks into fflate \`ZipPassThrough\` with compression disabled.
 
 Each row reports the median of its listed sample count. Each sample performs the listed number of writer iterations.
 
@@ -169,6 +171,14 @@ function runStrategy(
 function createBlob(strategy: DocxWriteStrategy, projection: OutputProjection): Blob {
   if (strategy === "naive") {
     return createNaiveDocxBlob(projection, metadata);
+  }
+
+  if (strategy === "fflate-store") {
+    return createFflateStoreDocxBlob(projection, metadata);
+  }
+
+  if (strategy === "fflate-stream") {
+    return createFflateStreamDocxBlob(projection, metadata);
   }
 
   const preparedPackage = prepareDocxPackage(projection);

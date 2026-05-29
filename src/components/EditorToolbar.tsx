@@ -21,11 +21,10 @@ import { $createHeadingNode, type HeadingTagType } from "@lexical/rich-text";
 import { $setBlocksType } from "@lexical/selection";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { mergeRegister } from "@lexical/utils";
-import type { DocxWriteStrategy } from "../ooxml/docx";
 
 type HeadingLevel = 1 | 2 | 3;
 
-export function EditorToolbar({ onExport }: { onExport: (strategy: DocxWriteStrategy) => void }) {
+export function EditorToolbar({ onExport }: { onExport: () => void }) {
   const [editor] = useLexicalComposerContext();
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -145,15 +144,8 @@ export function EditorToolbar({ onExport }: { onExport: (strategy: DocxWriteStra
           <span className="ribbon-label">Paragraph</span>
         </div>
         <div className="export-actions">
-          <button
-            className="export-button secondary"
-            type="button"
-            onClick={() => onExport("naive")}
-          >
-            Export naive
-          </button>
-          <button className="export-button" type="button" onClick={() => onExport("optimized")}>
-            Export optimized
+          <button className="export-button" type="button" onClick={onExport}>
+            Export .docx
           </button>
         </div>
       </div>

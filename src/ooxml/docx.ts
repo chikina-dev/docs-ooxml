@@ -6,6 +6,7 @@ import type {
   OutputProjection,
   StaticOoxmlPartProjection,
 } from "../pipeline/types";
+import { strToU8, Zip, ZipPassThrough, zipSync, type Zippable } from "fflate";
 import {
   appPropertiesXml,
   contentTypesXml,
@@ -16,6 +17,7 @@ import {
   numberingXml,
   rootRelationshipsXml,
   stylesXml,
+  writeDocumentXmlChunks,
 } from "./parts";
 import {
   createStoredZipEntry,
@@ -31,7 +33,7 @@ export type DocxMetadata = {
   createdAt: Date;
 };
 
-export type DocxWriteStrategy = "naive" | "optimized";
+export type DocxWriteStrategy = "naive" | "optimized" | "fflate-store" | "fflate-stream";
 
 export type PreparedDocxPackage = {
   kind: "preparedDocxPackage";
@@ -48,7 +50,18 @@ export type DocxBenchmarkResult = {
 type StaticPartRole = StaticOoxmlPartProjection["role"];
 
 const WORD_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const DOCX_WRITE_STRATEGIES: readonly DocxWriteStrategy[] = ["naive", "optimized"];
+const DOCX_WRITE_STRATEGIES: readonly DocxWriteStrategy[] = [
+  "naive",
+  "optimized",
+  "fflate-store",
+  "fflate-stream",
+];
+const FFLATE_MTIME = new Date("1980-01-01T00:00:00.000Z");
+const FFLATE_STORE_OPTIONS: { readonly level: 0; readonly mtime: Date } = {
+  level: 0,
+  mtime: FFLATE_MTIME,
+};
+const DOCUMENT_XML_STREAM_CHARS = 64 * 1024;
 const STATIC_ENTRY_BY_ROLE: Record<StaticPartRole, StoredZipEntry<OoxmlPackagePath>> = {
   contentTypes: createStoredZipEntry("[Content_Types].xml", contentTypesXml()),
   rootRelationships: createStoredZipEntry("_rels/.rels", rootRelationshipsXml()),
@@ -64,10 +77,18 @@ const STATIC_ENTRY_BY_ROLE: Record<StaticPartRole, StoredZipEntry<OoxmlPackagePa
 export function createDocxBlob(
   projection: OutputProjection,
   metadata: DocxMetadata,
-  strategy: DocxWriteStrategy = "optimized",
+  strategy: DocxWriteStrategy = "fflate-store",
 ): Blob {
   if (strategy === "naive") {
     return createNaiveDocxBlob(projection, metadata);
+  }
+
+  if (strategy === "fflate-store") {
+    return createFflateStoreDocxBlob(projection, metadata);
+  }
+
+  if (strategy === "fflate-stream") {
+    return createFflateStreamDocxBlob(projection, metadata);
   }
 
   return createOptimizedDocxBlob(prepareDocxPackage(projection), metadata);
@@ -104,6 +125,24 @@ export function createNaiveDocxBlob(projection: OutputProjection, metadata: Docx
   return new Blob([zip], { type: WORD_MIME });
 }
 
+export function createFflateStoreDocxBlob(
+  projection: OutputProjection,
+  metadata: DocxMetadata,
+): Blob {
+  const zip = zipSync(createFflateStorePackage(projection, metadata), FFLATE_STORE_OPTIONS);
+
+  return new Blob([zip], { type: WORD_MIME });
+}
+
+export function createFflateStreamDocxBlob(
+  projection: OutputProjection,
+  metadata: DocxMetadata,
+): Blob {
+  const zip = createFflateStreamStoreZip(projection, metadata);
+
+  return new Blob([zip], { type: WORD_MIME });
+}
+
 export function benchmarkDocxWriters(
   projection: OutputProjection,
   metadata: DocxMetadata,
@@ -120,7 +159,11 @@ export function benchmarkDocxWriters(
       sizeBytes =
         strategy === "naive"
           ? createNaiveDocxBlob(projection, metadata).size
-          : createOptimizedDocxBlob(preparedPackage, metadata).size;
+          : strategy === "optimized"
+            ? createOptimizedDocxBlob(preparedPackage, metadata).size
+            : strategy === "fflate-store"
+              ? createFflateStoreDocxBlob(projection, metadata).size
+              : createFflateStreamDocxBlob(projection, metadata).size;
     }
 
     return {
@@ -164,6 +207,105 @@ function isDocumentPart(part: OoxmlPartProjection): part is DocumentPartProjecti
 
 function storedStaticEntry(part: StaticOoxmlPartProjection): StoredZipEntry<OoxmlPackagePath> {
   return STATIC_ENTRY_BY_ROLE[part.role];
+}
+
+function createFflateStorePackage(projection: OutputProjection, metadata: DocxMetadata): Zippable {
+  const entries: Zippable = {};
+
+  for (const part of projection.parts) {
+    entries[part.path] = [partDataBytes(part, metadata), FFLATE_STORE_OPTIONS];
+  }
+
+  return entries;
+}
+
+function createFflateStreamStoreZip(
+  projection: OutputProjection,
+  metadata: DocxMetadata,
+): Uint8Array<ArrayBuffer> {
+  const chunks: Uint8Array[] = [];
+  const zip = new Zip((error, chunk) => {
+    if (error) {
+      throw error;
+    }
+
+    chunks.push(chunk);
+  });
+
+  for (const part of projection.parts) {
+    const entry = new ZipPassThrough(part.path);
+    entry.mtime = FFLATE_MTIME;
+    zip.add(entry);
+
+    if (part.role === "document") {
+      pushDocumentXmlToEntry(entry, part.paragraphs);
+    } else {
+      entry.push(partDataBytes(part, metadata), true);
+    }
+  }
+
+  zip.end();
+  return concatBytes(chunks);
+}
+
+function pushDocumentXmlToEntry(
+  entry: ZipPassThrough,
+  paragraphs: DocumentPartProjection["paragraphs"],
+): void {
+  const pendingChunks: string[] = [];
+  let pendingLength = 0;
+
+  writeDocumentXmlChunks(paragraphs, (chunk) => {
+    pendingChunks.push(chunk);
+    pendingLength += chunk.length;
+
+    if (pendingLength >= DOCUMENT_XML_STREAM_CHARS) {
+      flushDocumentXmlChunks(entry, pendingChunks, false);
+      pendingLength = 0;
+    }
+  });
+
+  flushDocumentXmlChunks(entry, pendingChunks, true);
+}
+
+function flushDocumentXmlChunks(
+  entry: ZipPassThrough,
+  pendingChunks: string[],
+  final: boolean,
+): void {
+  if (pendingChunks.length === 0) {
+    if (final) {
+      entry.push(new Uint8Array(), true);
+    }
+    return;
+  }
+
+  entry.push(strToU8(pendingChunks.join("")), final);
+  pendingChunks.length = 0;
+}
+
+function partDataBytes(part: OoxmlPartProjection, metadata: DocxMetadata): Uint8Array {
+  if (part.role === "coreProperties") {
+    return strToU8(corePropertiesXml(metadata));
+  }
+
+  if (part.role === "document") {
+    return strToU8(documentXmlOptimized(part.paragraphs));
+  }
+
+  return storedStaticEntry(part).dataBytes;
+}
+
+function concatBytes(chunks: readonly Uint8Array[]): Uint8Array<ArrayBuffer> {
+  const output = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.length, 0));
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  return output;
 }
 
 function staticPartXml(part: StaticOoxmlPartProjection): string {

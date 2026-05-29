@@ -17,6 +17,7 @@
     "@lexical/rich-text": "^0.44.0",
     "@lexical/selection": "^0.44.0",
     "@lexical/utils": "^0.44.0",
+    "fflate": "^0.8.3",
     "lexical": "^0.44.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"

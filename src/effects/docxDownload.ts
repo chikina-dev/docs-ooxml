@@ -4,7 +4,7 @@ import type { OutputProjection } from "../pipeline/types";
 export type DocxDownloadCommand = {
   title: string;
   projection: OutputProjection;
-  strategy: DocxWriteStrategy;
+  strategy?: DocxWriteStrategy;
 };
 
 export function downloadDocx(command: DocxDownloadCommand) {
@@ -16,12 +16,12 @@ export function downloadDocx(command: DocxDownloadCommand) {
       creator: "Docs OOXML",
       createdAt: new Date(),
     },
-    command.strategy,
+    command.strategy ?? "fflate-store",
   );
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${safeTitle}-${command.strategy}.docx`;
+  link.download = `${safeTitle}.docx`;
   link.click();
   URL.revokeObjectURL(url);
 }
