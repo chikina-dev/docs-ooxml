@@ -17,11 +17,11 @@ import {
   INSERT_UNORDERED_LIST_COMMAND,
   REMOVE_LIST_COMMAND,
 } from "@lexical/list";
-import { $createHeadingNode } from "@lexical/rich-text";
+import { $createHeadingNode, type HeadingTagType } from "@lexical/rich-text";
 import { $setBlocksType } from "@lexical/selection";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { mergeRegister } from "@lexical/utils";
-import type { DocxWriteStrategy } from "../ooxml/docx.ts";
+import type { DocxWriteStrategy } from "../ooxml/docx";
 
 type HeadingLevel = 1 | 2 | 3;
 
@@ -203,7 +203,19 @@ function formatHeading(editor: LexicalEditor, level: HeadingLevel) {
   editor.update(() => {
     const selection = $getSelection();
     if ($isRangeSelection(selection)) {
-      $setBlocksType(selection, () => $createHeadingNode(`h${level}` as "h1" | "h2" | "h3"));
+      $setBlocksType(selection, () => $createHeadingNode(headingTagForLevel(level)));
     }
   });
+}
+
+function headingTagForLevel(level: HeadingLevel): HeadingTagType {
+  if (level === 1) {
+    return "h1";
+  }
+
+  if (level === 2) {
+    return "h2";
+  }
+
+  return "h3";
 }

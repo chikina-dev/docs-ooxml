@@ -1,12 +1,18 @@
 import type {
   AuthorBlock,
   AuthorInline,
+  AuthorSourcePath,
   AuthorTree,
+  HeadingLevel,
   SemanticAuthorGraph,
   SemanticBlock,
+  SemanticBlockId,
   SemanticInline,
+  SemanticListGroup,
+  SemanticListGroupId,
+  SemanticSectionId,
   SemanticSection,
-} from "./types.ts";
+} from "./types";
 
 type BuildState = {
   nextBlockId: number;
@@ -14,12 +20,12 @@ type BuildState = {
   nextListGroupId: number;
   outlineCounters: number[];
   activeSections: Array<SemanticSection | undefined>;
-  currentSectionId: string;
+  currentSectionId: SemanticSectionId;
   sections: SemanticSection[];
   blocks: SemanticBlock[];
-  listGroups: SemanticAuthorGraph["listGroups"];
+  listGroups: SemanticListGroup[];
   edges: SemanticAuthorGraph["edges"];
-  readingOrder: string[];
+  readingOrder: SemanticBlockId[];
 };
 
 export function authorTreeToSemanticGraph(tree: AuthorTree): SemanticAuthorGraph {
@@ -82,7 +88,7 @@ function addHeading(
   const section = createSection(block, parentSection, headingBlockId, state);
   const semanticBlock: SemanticBlock = {
     id: headingBlockId,
-    sourcePath: `/children/${index}`,
+    sourcePath: blockSourcePath(index),
     sectionId: parentSection.id,
     createsSectionId: section.id,
     kind: "heading",
@@ -113,7 +119,7 @@ function addParagraph(
   const blockId = nextBlockId(state);
   state.blocks.push({
     id: blockId,
-    sourcePath: `/children/${index}`,
+    sourcePath: blockSourcePath(index),
     sectionId: currentSection.id,
     kind: "paragraph",
     inlines: normalizeInlines(block.children),
@@ -129,11 +135,11 @@ function addListGroup(
   state: BuildState,
 ) {
   const currentSection = sectionById(state.currentSectionId, state);
-  const listGroup = {
-    id: `list-${state.nextListGroupId++}`,
+  const listGroup: SemanticListGroup = {
+    id: nextListGroupId(state),
     sectionId: currentSection.id,
     listKind: block.listKind,
-    itemIds: [] as string[],
+    itemIds: [],
   };
 
   block.children.forEach((item, itemIndex) => {
@@ -141,7 +147,7 @@ function addListGroup(
     listGroup.itemIds.push(blockId);
     state.blocks.push({
       id: blockId,
-      sourcePath: `/children/${index}/children/${itemIndex}`,
+      sourcePath: listItemSourcePath(index, itemIndex),
       sectionId: currentSection.id,
       listGroupId: listGroup.id,
       ordinalInList: itemIndex + 1,
@@ -162,12 +168,12 @@ function addListGroup(
 function createSection(
   block: Extract<AuthorBlock, { kind: "heading" }>,
   parentSection: SemanticSection,
-  headingBlockId: string,
+  headingBlockId: SemanticBlockId,
   state: BuildState,
 ): SemanticSection {
   const outlinePath = nextOutlinePath(block.level, state);
   return {
-    id: `section-${state.nextSectionId++}`,
+    id: nextSectionId(state),
     parentId: parentSection.id,
     headingBlockId,
     title: plainText(block.children),
@@ -178,7 +184,7 @@ function createSection(
   };
 }
 
-function findParentSection(level: 1 | 2 | 3, state: BuildState): SemanticSection {
+function findParentSection(level: HeadingLevel, state: BuildState): SemanticSection {
   for (let candidateLevel = level - 1; candidateLevel >= 0; candidateLevel -= 1) {
     const section = state.activeSections[candidateLevel];
     if (section) {
@@ -189,18 +195,34 @@ function findParentSection(level: 1 | 2 | 3, state: BuildState): SemanticSection
   return state.sections[0]!;
 }
 
-function nextOutlinePath(level: 1 | 2 | 3, state: BuildState): number[] {
+function nextOutlinePath(level: HeadingLevel, state: BuildState): number[] {
   state.outlineCounters[level - 1] = (state.outlineCounters[level - 1] ?? 0) + 1;
   state.outlineCounters.length = level;
 
   return state.outlineCounters.slice(0, level);
 }
 
-function nextBlockId(state: BuildState): string {
+function nextBlockId(state: BuildState): SemanticBlockId {
   return `block-${state.nextBlockId++}`;
 }
 
-function sectionById(sectionId: string, state: BuildState): SemanticSection {
+function nextSectionId(state: BuildState): SemanticSectionId {
+  return `section-${state.nextSectionId++}`;
+}
+
+function nextListGroupId(state: BuildState): SemanticListGroupId {
+  return `list-${state.nextListGroupId++}`;
+}
+
+function blockSourcePath(index: number): AuthorSourcePath {
+  return `/children/${index}`;
+}
+
+function listItemSourcePath(blockIndex: number, itemIndex: number): AuthorSourcePath {
+  return `/children/${blockIndex}/children/${itemIndex}`;
+}
+
+function sectionById(sectionId: SemanticSectionId, state: BuildState): SemanticSection {
   return state.sections.find((section) => section.id === sectionId) ?? state.sections[0]!;
 }
 

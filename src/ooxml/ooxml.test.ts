@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import { createPipelineFromLexicalJson } from "../pipeline/createPipeline.ts";
-import { benchmarkDocxWriters, createDocxBlob, createDocxPackage } from "./docx.ts";
-import { escapeXml } from "./xml.ts";
-import { crc32, createZipNaive, createZipOptimized, listZipEntries } from "./zip.ts";
+import { createPipelineFromLexicalJson } from "../pipeline/createPipeline";
+import { benchmarkDocxWriters, createDocxBlob, createDocxPackage } from "./docx";
+import { escapeXml } from "./xml";
+import { crc32, createZipNaive, createZipOptimized, listZipEntries } from "./zip";
 
 const projection = createPipelineFromLexicalJson({
   root: {

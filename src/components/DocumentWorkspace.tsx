@@ -1,10 +1,10 @@
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
-import type { AuthoringCommands, AuthoringSnapshot } from "../app/authoringTypes.ts";
-import { lexicalInitialConfig } from "../editor/lexicalConfig.ts";
-import type { DocxWriteStrategy } from "../ooxml/docx.ts";
-import { DocumentEditor } from "./DocumentEditor.tsx";
-import { EditorToolbar } from "./EditorToolbar.tsx";
-import { TitleBar } from "./TitleBar.tsx";
+import type { AuthoringCommands, AuthoringSnapshot } from "../app/authoringTypes";
+import { lexicalInitialConfig } from "../editor/lexicalConfig";
+import type { DocxWriteStrategy } from "../ooxml/docx";
+import { DocumentEditor } from "./DocumentEditor";
+import { EditorToolbar } from "./EditorToolbar";
+import { TitleBar } from "./TitleBar";
 
 export function DocumentWorkspace({
   commands,

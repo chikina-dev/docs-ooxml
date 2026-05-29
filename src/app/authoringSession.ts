@@ -1,7 +1,7 @@
 import type { EditorState } from "lexical";
 import { useCallback, useMemo, useState } from "react";
-import { createPipelineFromLexicalJson } from "../pipeline/createPipeline.ts";
-import type { AuthoringCommands, AuthoringSnapshot } from "./authoringTypes.ts";
+import { createPipelineFromLexicalJson } from "../pipeline/createPipeline";
+import type { AuthoringCommands, AuthoringSnapshot } from "./authoringTypes";
 
 const INITIAL_PIPELINE = createPipelineFromLexicalJson({
   root: {

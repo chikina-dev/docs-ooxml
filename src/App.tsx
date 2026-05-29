@@ -1,9 +1,9 @@
 import { useCallback } from "react";
-import { useAuthoringSession } from "./app/authoringSession.ts";
-import { DocumentWorkspace } from "./components/DocumentWorkspace.tsx";
-import { PipelinePreview } from "./components/PipelinePreview.tsx";
-import { downloadDocx } from "./effects/docxDownload.ts";
-import type { DocxWriteStrategy } from "./ooxml/docx.ts";
+import { useAuthoringSession } from "./app/authoringSession";
+import { DocumentWorkspace } from "./components/DocumentWorkspace";
+import { PipelinePreview } from "./components/PipelinePreview";
+import { downloadDocx } from "./effects/docxDownload";
+import type { DocxWriteStrategy } from "./ooxml/docx";
 
 export default function App() {
   const { commands, snapshot } = useAuthoringSession();

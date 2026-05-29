@@ -1,4 +1,9 @@
-import type { PipelineSnapshot } from "../app/authoringTypes.ts";
+import type { PipelineSnapshot } from "../app/authoringTypes";
+
+type PreviewData =
+  | PipelineSnapshot["authorTree"]
+  | PipelineSnapshot["semanticGraph"]
+  | PipelineSnapshot["outputProjection"];
 
 export function PipelinePreview({ pipeline }: { pipeline: PipelineSnapshot }) {
   return (
@@ -10,7 +15,7 @@ export function PipelinePreview({ pipeline }: { pipeline: PipelineSnapshot }) {
   );
 }
 
-function PreviewSection({ title, data }: { title: string; data: unknown }) {
+function PreviewSection({ title, data }: { title: string; data: PreviewData }) {
   return (
     <details className="preview-section" open>
       <summary>{title}</summary>

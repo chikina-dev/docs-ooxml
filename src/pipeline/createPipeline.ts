@@ -1,9 +1,10 @@
-import { lexicalJsonToAuthorTree } from "./authorTree.ts";
-import { authorTreeToSemanticGraph } from "./semanticGraph.ts";
-import { semanticGraphToOutputProjection } from "./outputProjection.ts";
+import { lexicalJsonToAuthorTree } from "./authorTree";
+import { authorTreeToSemanticGraph } from "./semanticGraph";
+import { semanticGraphToOutputProjection } from "./outputProjection";
+import type { LexicalEditorJson } from "./authorTree";
 
-export function createPipelineFromLexicalJson(json: unknown) {
-  const authorTree = lexicalJsonToAuthorTree(json as Parameters<typeof lexicalJsonToAuthorTree>[0]);
+export function createPipelineFromLexicalJson(json: LexicalEditorJson) {
+  const authorTree = lexicalJsonToAuthorTree(json);
   const semanticGraph = authorTreeToSemanticGraph(authorTree);
   const outputProjection = semanticGraphToOutputProjection(semanticGraph);
 

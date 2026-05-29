@@ -1,5 +1,5 @@
-import { createDocxBlob, type DocxWriteStrategy } from "../ooxml/docx.ts";
-import type { OutputProjection } from "../pipeline/types.ts";
+import { createDocxBlob, type DocxWriteStrategy } from "../ooxml/docx";
+import type { OutputProjection } from "../pipeline/types";
 
 export type DocxDownloadCommand = {
   title: string;

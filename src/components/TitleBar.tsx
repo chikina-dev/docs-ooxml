@@ -1,4 +1,4 @@
-import type { AuthoringCommands, AuthoringSnapshot } from "../app/authoringTypes.ts";
+import type { AuthoringCommands, AuthoringSnapshot } from "../app/authoringTypes";
 
 export function TitleBar({
   commands,

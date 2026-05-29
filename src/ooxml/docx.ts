@@ -1,12 +1,19 @@
-import type { OoxmlPartProjection, OutputProjection } from "../pipeline/types.ts";
-import { corePropertiesXml } from "./parts.ts";
+import type {
+  CorePropertiesPartProjection,
+  DocumentPartProjection,
+  OoxmlPackagePath,
+  OoxmlPartProjection,
+  OutputProjection,
+  StaticOoxmlPartProjection,
+} from "../pipeline/types";
+import { corePropertiesXml } from "./parts";
 import {
   createStoredZipEntry,
   createZipFromStoredEntries,
   createZipNaive,
   type StoredZipEntry,
   type ZipEntry,
-} from "./zip.ts";
+} from "./zip";
 
 export type DocxMetadata = {
   title: string;
@@ -18,7 +25,7 @@ export type DocxWriteStrategy = "naive" | "optimized";
 
 export type PreparedDocxPackage = {
   kind: "preparedDocxPackage";
-  stableEntries: StoredZipEntry[];
+  stableEntries: readonly StoredZipEntry<OoxmlPackagePath>[];
 };
 
 export type DocxBenchmarkResult = {
@@ -29,7 +36,8 @@ export type DocxBenchmarkResult = {
 };
 
 const WORD_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const staticEntryCache = new Map<string, StoredZipEntry>();
+const staticEntryCache = new Map<OoxmlPackagePath, StoredZipEntry<OoxmlPackagePath>>();
+const DOCX_WRITE_STRATEGIES: readonly DocxWriteStrategy[] = ["naive", "optimized"];
 
 export function createDocxBlob(
   projection: OutputProjection,
@@ -47,11 +55,9 @@ export function prepareDocxPackage(projection: OutputProjection): PreparedDocxPa
   return {
     kind: "preparedDocxPackage",
     stableEntries: projection.parts
-      .filter((part) => part.role !== "coreProperties")
+      .filter((part) => !isCorePropertiesPart(part))
       .map((part) =>
-        part.role === "document"
-          ? createStoredZipEntry(part.path, part.xml)
-          : storedStaticEntry(part),
+        isDocumentPart(part) ? createStoredZipEntry(part.path, part.xml) : storedStaticEntry(part),
       ),
   };
 }
@@ -65,13 +71,13 @@ export function createOptimizedDocxBlob(
     createStoredZipEntry("docProps/core.xml", corePropertiesXml(metadata)),
   ]);
 
-  return new Blob([zip.buffer as ArrayBuffer], { type: WORD_MIME });
+  return new Blob([zip], { type: WORD_MIME });
 }
 
 export function createNaiveDocxBlob(projection: OutputProjection, metadata: DocxMetadata): Blob {
   const zip = createZipNaive(createDocxPackage(projection, metadata));
 
-  return new Blob([zip.buffer as ArrayBuffer], { type: WORD_MIME });
+  return new Blob([zip], { type: WORD_MIME });
 }
 
 export function benchmarkDocxWriters(
@@ -82,7 +88,7 @@ export function benchmarkDocxWriters(
 ): DocxBenchmarkResult[] {
   const preparedPackage = prepareDocxPackage(projection);
 
-  return (["naive", "optimized"] as const).map((strategy) => {
+  return DOCX_WRITE_STRATEGIES.map((strategy) => {
     const start = now();
     let sizeBytes = 0;
 
@@ -105,7 +111,7 @@ export function benchmarkDocxWriters(
 export function createDocxPackage(
   projection: OutputProjection,
   metadata: DocxMetadata,
-): ZipEntry[] {
+): ZipEntry<OoxmlPackagePath>[] {
   return projection.parts.map((part) => ({
     path: part.path,
     data: partXml(part, metadata),
@@ -120,7 +126,15 @@ function partXml(part: OoxmlPartProjection, metadata: DocxMetadata): string {
   return part.xml;
 }
 
-function storedStaticEntry(part: OoxmlPartProjection): StoredZipEntry {
+function isCorePropertiesPart(part: OoxmlPartProjection): part is CorePropertiesPartProjection {
+  return part.role === "coreProperties";
+}
+
+function isDocumentPart(part: OoxmlPartProjection): part is DocumentPartProjection {
+  return part.role === "document";
+}
+
+function storedStaticEntry(part: StaticOoxmlPartProjection): StoredZipEntry<OoxmlPackagePath> {
   const cached = staticEntryCache.get(part.path);
   if (cached) {
     return cached;

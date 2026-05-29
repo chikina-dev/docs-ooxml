@@ -1,19 +1,62 @@
-import type { AuthorBlock, AuthorInline, AuthorListItem, AuthorTree, TextMarks } from "./types.ts";
+import type {
+  AuthorBlock,
+  AuthorInline,
+  AuthorListItem,
+  AuthorTree,
+  HeadingLevel,
+  ListKind,
+  TextMarks,
+} from "./types";
 
-type LexicalNodeJson = {
-  type?: string;
+type LexicalTextFormat = number | string;
+type LexicalHeadingTag = "h1" | "h2" | "h3";
+
+export type LexicalNodeJson = {
+  type: string;
   text?: string;
-  format?: number | string;
+  format?: LexicalTextFormat;
   tag?: string;
   listType?: string;
   children?: LexicalNodeJson[];
 };
 
-type LexicalEditorJson = {
-  root?: {
+export type LexicalEditorJson = {
+  root: {
     children?: LexicalNodeJson[];
   };
 };
+
+type SerializedLexicalNode =
+  | {
+      type: "text";
+      text: string;
+      format?: LexicalTextFormat;
+    }
+  | {
+      type: "linebreak";
+    }
+  | {
+      type: "paragraph";
+      children: SerializedLexicalNode[];
+    }
+  | {
+      type: "heading";
+      tag?: LexicalHeadingTag;
+      children: SerializedLexicalNode[];
+    }
+  | {
+      type: "list";
+      listType: ListKind;
+      children: SerializedLexicalNode[];
+    }
+  | {
+      type: "listitem";
+      children: SerializedLexicalNode[];
+    }
+  | {
+      type: "unsupported";
+      children: SerializedLexicalNode[];
+    };
 
 const TEXT_FORMAT = {
   bold: 1,
@@ -24,11 +67,11 @@ const TEXT_FORMAT = {
 export function lexicalJsonToAuthorTree(json: LexicalEditorJson): AuthorTree {
   return {
     kind: "document",
-    children: (json.root?.children ?? []).flatMap(readBlock),
+    children: readEditorChildren(json).flatMap(readBlock),
   };
 }
 
-function readBlock(node: LexicalNodeJson): AuthorBlock[] {
+function readBlock(node: SerializedLexicalNode): AuthorBlock[] {
   if (node.type === "paragraph") {
     return [{ kind: "paragraph", children: readInlines(node.children ?? []) }];
   }
@@ -44,7 +87,6 @@ function readBlock(node: LexicalNodeJson): AuthorBlock[] {
   }
 
   if (node.type === "list") {
-    const listKind = node.listType === "number" ? "number" : "bullet";
     const children = (node.children ?? []).flatMap((child): AuthorListItem[] => {
       if (child.type === "listitem") {
         return [{ kind: "listItem", children: readListItemInlines(child.children ?? []) }];
@@ -52,28 +94,30 @@ function readBlock(node: LexicalNodeJson): AuthorBlock[] {
 
       return [{ kind: "listItem", children: readInlines([child]) }];
     });
-    return [{ kind: "list", listKind, children }];
+    return [{ kind: "list", listKind: node.listType, children }];
   }
 
   const children = readInlines([node]);
   return children.length > 0 ? [{ kind: "paragraph", children }] : [];
 }
 
-function readListItemInlines(children: LexicalNodeJson[]): AuthorInline[] {
+function readListItemInlines(children: SerializedLexicalNode[]): AuthorInline[] {
   return children.flatMap((child) => {
     if (child.type === "paragraph") {
       return readInlines(child.children ?? []);
     }
 
     if (child.type === "list") {
-      return child.children?.flatMap((nested) => readListItemInlines(nested.children ?? [])) ?? [];
+      return child.children.flatMap((nested) =>
+        nested.type === "listitem" ? readListItemInlines(nested.children) : readInlines([nested]),
+      );
     }
 
     return readInlines([child]);
   });
 }
 
-function readInlines(nodes: LexicalNodeJson[]): AuthorInline[] {
+function readInlines(nodes: SerializedLexicalNode[]): AuthorInline[] {
   return nodes.flatMap((node): AuthorInline[] => {
     if (node.type === "text" && node.text !== undefined) {
       return [{ kind: "textRun", text: node.text, marks: readTextMarks(node.format) }];
@@ -83,11 +127,11 @@ function readInlines(nodes: LexicalNodeJson[]): AuthorInline[] {
       return [{ kind: "lineBreak" }];
     }
 
-    return readInlines(node.children ?? []);
+    return "children" in node ? readInlines(node.children) : [];
   });
 }
 
-function readHeadingLevel(tag: string | undefined): 1 | 2 | 3 {
+function readHeadingLevel(tag: LexicalHeadingTag | undefined): HeadingLevel {
   if (tag === "h2") {
     return 2;
   }
@@ -99,7 +143,68 @@ function readHeadingLevel(tag: string | undefined): 1 | 2 | 3 {
   return 1;
 }
 
-function readTextMarks(format: number | string | undefined): TextMarks {
+function readEditorChildren(json: LexicalEditorJson): SerializedLexicalNode[] {
+  return readNodeList(json.root.children ?? []);
+}
+
+function readNodeList(value: LexicalNodeJson[]): SerializedLexicalNode[] {
+  return value.map(readNode);
+}
+
+function readNode(value: LexicalNodeJson): SerializedLexicalNode {
+  const originalType = value.type;
+  if (originalType === "text" && typeof value.text === "string") {
+    return { type: "text", text: value.text, format: readTextFormat(value.format) };
+  }
+
+  if (originalType === "linebreak") {
+    return { type: "linebreak" };
+  }
+
+  if (originalType === "paragraph") {
+    return { type: "paragraph", children: readNodeList(value.children ?? []) };
+  }
+
+  if (originalType === "heading") {
+    return {
+      type: "heading",
+      tag: readHeadingTag(value.tag),
+      children: readNodeList(value.children ?? []),
+    };
+  }
+
+  if (originalType === "list") {
+    return {
+      type: "list",
+      listType: readListKind(value.listType),
+      children: readNodeList(value.children ?? []),
+    };
+  }
+
+  if (originalType === "listitem") {
+    return { type: "listitem", children: readNodeList(value.children ?? []) };
+  }
+
+  return { type: "unsupported", children: readNodeList(value.children ?? []) };
+}
+
+function readTextFormat(value: LexicalNodeJson["format"]): LexicalTextFormat | undefined {
+  return typeof value === "number" || typeof value === "string" ? value : undefined;
+}
+
+function readHeadingTag(value: LexicalNodeJson["tag"]): LexicalHeadingTag | undefined {
+  if (value === "h1" || value === "h2" || value === "h3") {
+    return value;
+  }
+
+  return undefined;
+}
+
+function readListKind(value: LexicalNodeJson["listType"]): ListKind {
+  return value === "number" ? "number" : "bullet";
+}
+
+function readTextMarks(format: LexicalTextFormat | undefined): TextMarks {
   if (typeof format === "string") {
     return {
       bold: format.includes("bold") || undefined,

@@ -1,12 +1,18 @@
 import type {
-  OoxmlPartProjection,
+  HeadingLevel,
+  ListKind,
+  OoxmlPartProjectionList,
   OutputProjection,
   SemanticAuthorGraph,
+  SemanticBlockId,
   SemanticBlock,
   SemanticInline,
+  WordHeadingStyleId,
+  WordNumberingId,
   WordParagraph,
   WordRun,
-} from "./types.ts";
+  WordStyleId,
+} from "./types";
 import {
   appPropertiesXml,
   contentTypesXml,
@@ -16,22 +22,28 @@ import {
   numberingXml,
   rootRelationshipsXml,
   stylesXml,
-} from "../ooxml/parts.ts";
+} from "../ooxml/parts";
+
+const WORD_STYLES: readonly WordStyleId[] = [
+  "Normal",
+  "Heading1",
+  "Heading2",
+  "Heading3",
+  "ListParagraph",
+];
 
 export function semanticGraphToOutputProjection(graph: SemanticAuthorGraph): OutputProjection {
   const numbering = graph.listGroups.map((listGroup) => ({
     listGroupId: listGroup.id,
     listKind: listGroup.listKind,
-    numId: (listGroup.listKind === "number" ? 2 : 1) as 1 | 2,
+    numId: numberingIdForListKind(listGroup.listKind),
   }));
   const paragraphs = graph.readingOrder.map((blockId) =>
     blockToWordParagraph(blockById(graph, blockId)),
   );
-  const documentPlan = {
-    page: "letter" as const,
-    styles: ["Normal", "Heading1", "Heading2", "Heading3", "ListParagraph"] as Array<
-      "Normal" | "Heading1" | "Heading2" | "Heading3" | "ListParagraph"
-    >,
+  const documentPlan: OutputProjection["documentPlan"] = {
+    page: "letter",
+    styles: WORD_STYLES,
     numbering,
   };
 
@@ -51,7 +63,7 @@ function blockToWordParagraph(block: SemanticBlock): WordParagraph {
       sourceBlockId: block.id,
       sectionId: block.createsSectionId,
       semanticRole: "sectionHeading",
-      styleId: `Heading${block.level}` as const,
+      styleId: headingStyleId(block.level),
       runs: inlinesToRuns(block.inlines),
     };
   }
@@ -67,7 +79,7 @@ function blockToWordParagraph(block: SemanticBlock): WordParagraph {
         listGroupId: block.listGroupId,
         listKind: block.listKind,
         level: block.level,
-        numId: block.listKind === "number" ? 2 : 1,
+        numId: numberingIdForListKind(block.listKind),
       },
       level: block.level,
       runs: inlinesToRuns(block.inlines),
@@ -84,7 +96,7 @@ function blockToWordParagraph(block: SemanticBlock): WordParagraph {
   };
 }
 
-function createOoxmlPartProjection(paragraphs: WordParagraph[]): OoxmlPartProjection[] {
+function createOoxmlPartProjection(paragraphs: WordParagraph[]): OoxmlPartProjectionList {
   return [
     {
       path: "[Content_Types].xml",
@@ -132,10 +144,10 @@ function createOoxmlPartProjection(paragraphs: WordParagraph[]): OoxmlPartProjec
       role: "documentRelationships",
       xml: documentRelationshipsXml(),
     },
-  ];
+  ] satisfies OoxmlPartProjectionList;
 }
 
-function blockById(graph: SemanticAuthorGraph, blockId: string): SemanticBlock {
+function blockById(graph: SemanticAuthorGraph, blockId: SemanticBlockId): SemanticBlock {
   const block = graph.blocks.find((item) => item.id === blockId);
   if (!block) {
     throw new Error(`Output projection could not find semantic block ${blockId}`);
@@ -156,4 +168,20 @@ function inlinesToRuns(inlines: SemanticInline[]): WordRun[] {
       marks: { ...inline.marks },
     };
   });
+}
+
+function headingStyleId(level: HeadingLevel): WordHeadingStyleId {
+  if (level === 1) {
+    return "Heading1";
+  }
+
+  if (level === 2) {
+    return "Heading2";
+  }
+
+  return "Heading3";
+}
+
+function numberingIdForListKind(listKind: ListKind): WordNumberingId {
+  return listKind === "number" ? 2 : 1;
 }

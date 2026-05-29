@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
-import { lexicalJsonToAuthorTree } from "./authorTree.ts";
-import { semanticGraphToOutputProjection } from "./outputProjection.ts";
-import { authorTreeToSemanticGraph } from "./semanticGraph.ts";
+import { lexicalJsonToAuthorTree } from "./authorTree";
+import { semanticGraphToOutputProjection } from "./outputProjection";
+import { authorTreeToSemanticGraph } from "./semanticGraph";
 
 const lexicalJson = {
   root: {

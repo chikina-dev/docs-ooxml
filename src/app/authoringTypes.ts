@@ -1,5 +1,5 @@
 import type { EditorState } from "lexical";
-import type { createPipelineFromLexicalJson } from "../pipeline/createPipeline.ts";
+import type { createPipelineFromLexicalJson } from "../pipeline/createPipeline";
 
 export type PipelineSnapshot = ReturnType<typeof createPipelineFromLexicalJson>;
 

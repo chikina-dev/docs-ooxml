@@ -3,9 +3,9 @@ import {
   createOptimizedDocxBlob,
   prepareDocxPackage,
   type DocxWriteStrategy,
-} from "../src/ooxml/docx.ts";
-import { createPipelineFromLexicalJson } from "../src/pipeline/createPipeline.ts";
-import type { OutputProjection } from "../src/pipeline/types.ts";
+} from "../src/ooxml/docx";
+import { createPipelineFromLexicalJson } from "../src/pipeline/createPipeline";
+import type { OutputProjection } from "../src/pipeline/types";
 
 type Scenario = {
   name: string;
@@ -30,6 +30,15 @@ type Row = {
   maxAvgMs: number;
   sizeBytes: number;
 };
+
+type BunRuntime = {
+  env: Record<string, string | undefined>;
+  write(path: string, content: string): Promise<number>;
+};
+
+declare global {
+  var Bun: BunRuntime | undefined;
+}
 
 const SCENARIOS: Scenario[] = [
   { name: "small", paragraphs: 20, listItems: 10, iterations: 200 },
@@ -107,16 +116,9 @@ ${table}
 
 console.log(summary);
 
-const bun = globalThis as typeof globalThis & {
-  Bun?: {
-    env: Record<string, string | undefined>;
-    write(path: string, content: string): Promise<number>;
-  };
-};
-
-const stepSummaryPath = bun.Bun?.env.GITHUB_STEP_SUMMARY;
+const stepSummaryPath = globalThis.Bun?.env.GITHUB_STEP_SUMMARY;
 if (stepSummaryPath) {
-  await bun.Bun?.write(stepSummaryPath, `${summary}\n`);
+  await globalThis.Bun?.write(stepSummaryPath, `${summary}\n`);
 }
 
 function runStrategy(

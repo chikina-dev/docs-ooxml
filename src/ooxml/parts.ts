@@ -1,5 +1,5 @@
-import type { WordParagraph, WordRun } from "../pipeline/types.ts";
-import { escapeXml, xmlDeclaration } from "./xml.ts";
+import type { WordParagraph, WordRun } from "../pipeline/types";
+import { escapeXml, xmlDeclaration } from "./xml";
 
 export type CorePropertiesValues = {
   title: string;

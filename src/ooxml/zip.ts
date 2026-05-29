@@ -1,22 +1,24 @@
-export type ZipEntry = {
-  path: string;
+export type ZipEntry<Path extends string = string> = {
+  path: Path;
   data: string | Uint8Array;
 };
 
-export type StoredZipEntry = {
-  path: string;
+export type StoredZipEntry<Path extends string = string> = {
+  path: Path;
   pathBytes: Uint8Array;
   dataBytes: Uint8Array;
   crc: number;
 };
 
-type PreparedZipEntry = StoredZipEntry & {
+type PreparedZipEntry<Path extends string = string> = StoredZipEntry<Path> & {
   offset: number;
 };
 
 const encoder = new TextEncoder();
 
-export function createZipNaive(entries: ZipEntry[]): Uint8Array {
+export function createZipNaive<Path extends string>(
+  entries: readonly ZipEntry<Path>[],
+): Uint8Array<ArrayBuffer> {
   const prepared = prepareEntries(entries);
   const localFiles = prepared.map(createLocalFile);
   const centralDirectoryOffset = byteLength(localFiles);
@@ -31,13 +33,17 @@ export function createZipNaive(entries: ZipEntry[]): Uint8Array {
   return concatBytes([...localFiles, ...centralDirectory, end]);
 }
 
-export function createZipOptimized(entries: ZipEntry[]): Uint8Array {
+export function createZipOptimized<Path extends string>(
+  entries: readonly ZipEntry<Path>[],
+): Uint8Array<ArrayBuffer> {
   return createZipFromStoredEntries(
     entries.map((entry) => createStoredZipEntry(entry.path, entry.data)),
   );
 }
 
-export function createZipFromStoredEntries(entries: StoredZipEntry[]): Uint8Array {
+export function createZipFromStoredEntries<Path extends string>(
+  entries: readonly StoredZipEntry<Path>[],
+): Uint8Array<ArrayBuffer> {
   const centralDirectoryOffset = entries.reduce(
     (offset, entry) => offset + storedLocalFileLength(entry),
     0,
@@ -70,7 +76,10 @@ export function createZipFromStoredEntries(entries: StoredZipEntry[]): Uint8Arra
   return output;
 }
 
-export function createStoredZipEntry(path: string, data: string | Uint8Array): StoredZipEntry {
+export function createStoredZipEntry<const Path extends string>(
+  path: Path,
+  data: string | Uint8Array,
+): StoredZipEntry<Path> {
   const dataBytes = typeof data === "string" ? encoder.encode(data) : data;
   return {
     path,
@@ -116,7 +125,7 @@ function writeStoredLocalFile(output: Uint8Array, offset: number, entry: StoredZ
   return offset + storedLocalFileLength(entry);
 }
 
-function createLocalFile(entry: PreparedZipEntry): Uint8Array {
+function createLocalFile(entry: PreparedZipEntry): Uint8Array<ArrayBuffer> {
   return concatBytes([createLocalFileHeader(entry), entry.pathBytes, entry.dataBytes]);
 }
 
@@ -135,7 +144,7 @@ function writeLocalFileHeader(output: Uint8Array, offset: number, entry: StoredZ
   view.setUint16(28, 0, true);
 }
 
-function createLocalFileHeader(entry: PreparedZipEntry): Uint8Array {
+function createLocalFileHeader(entry: PreparedZipEntry): Uint8Array<ArrayBuffer> {
   const header = new Uint8Array(30);
   writeLocalFileHeader(header, 0, entry);
   return header;
@@ -179,13 +188,13 @@ function writeCentralDirectoryFileHeader(
   view.setUint32(42, localOffset, true);
 }
 
-function createCentralDirectoryFileHeader(entry: PreparedZipEntry): Uint8Array {
+function createCentralDirectoryFileHeader(entry: PreparedZipEntry): Uint8Array<ArrayBuffer> {
   const header = new Uint8Array(46);
   writeCentralDirectoryFileHeader(header, 0, entry, entry.offset);
   return header;
 }
 
-function createCentralDirectoryFile(entry: PreparedZipEntry): Uint8Array {
+function createCentralDirectoryFile(entry: PreparedZipEntry): Uint8Array<ArrayBuffer> {
   return concatBytes([createCentralDirectoryFileHeader(entry), entry.pathBytes]);
 }
 
@@ -211,13 +220,13 @@ function createEndOfCentralDirectory(
   entryCount: number,
   centralDirectorySize: number,
   centralDirectoryOffset: number,
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   const end = new Uint8Array(22);
   writeEndOfCentralDirectory(end, 0, entryCount, centralDirectorySize, centralDirectoryOffset);
   return end;
 }
 
-function concatBytes(chunks: Uint8Array[]): Uint8Array {
+function concatBytes(chunks: Uint8Array[]): Uint8Array<ArrayBuffer> {
   const output = new Uint8Array(byteLength(chunks));
   let cursor = 0;
 
@@ -233,13 +242,17 @@ function byteLength(chunks: Uint8Array[]): number {
   return chunks.reduce((length, chunk) => length + chunk.length, 0);
 }
 
-function prepareEntries(entries: ZipEntry[]): PreparedZipEntry[] {
+function prepareEntries<Path extends string>(
+  entries: readonly ZipEntry<Path>[],
+): PreparedZipEntry<Path>[] {
   return prepareStoredEntries(entries.map((entry) => createStoredZipEntry(entry.path, entry.data)));
 }
 
-function prepareStoredEntries(entries: StoredZipEntry[]): PreparedZipEntry[] {
+function prepareStoredEntries<Path extends string>(
+  entries: readonly StoredZipEntry<Path>[],
+): PreparedZipEntry<Path>[] {
   let offset = 0;
-  return entries.map((entry): PreparedZipEntry => {
+  return entries.map((entry): PreparedZipEntry<Path> => {
     const preparedEntry = {
       path: entry.path,
       pathBytes: entry.pathBytes,
