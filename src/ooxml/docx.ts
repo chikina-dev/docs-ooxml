@@ -1,6 +1,12 @@
 import type { OoxmlPartProjection, OutputProjection } from "../pipeline/types.ts";
 import { corePropertiesXml } from "./parts.ts";
-import { createZip, createZipBlobParts, type ZipEntry } from "./zip.ts";
+import {
+  createStoredZipEntry,
+  createZipFromStoredEntries,
+  createZipNaive,
+  type StoredZipEntry,
+  type ZipEntry,
+} from "./zip.ts";
 
 export type DocxMetadata = {
   title: string;
@@ -8,7 +14,7 @@ export type DocxMetadata = {
   createdAt: Date;
 };
 
-export type DocxWriteStrategy = "package-buffer" | "chunked-zip";
+export type DocxWriteStrategy = "naive" | "optimized";
 
 export type DocxBenchmarkResult = {
   strategy: DocxWriteStrategy;
@@ -18,35 +24,19 @@ export type DocxBenchmarkResult = {
 };
 
 const WORD_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const projectionEntryCache = new WeakMap<OutputProjection, StoredZipEntry[]>();
 
 export function createDocxBlob(
   projection: OutputProjection,
   metadata: DocxMetadata,
-  strategy: DocxWriteStrategy = "package-buffer",
+  strategy: DocxWriteStrategy = "optimized",
 ): Blob {
-  if (strategy === "chunked-zip") {
-    return createDocxBlobChunkedZip(projection, metadata);
-  }
+  const zip =
+    strategy === "naive"
+      ? createZipNaive(createDocxPackage(projection, metadata))
+      : createZipFromStoredEntries(createOptimizedDocxPackage(projection, metadata));
 
-  return createDocxBlobPackageBuffer(projection, metadata);
-}
-
-export function createDocxBlobPackageBuffer(
-  projection: OutputProjection,
-  metadata: DocxMetadata,
-): Blob {
-  const zip = createZip(createDocxPackage(projection, metadata));
-  const buffer = new ArrayBuffer(zip.byteLength);
-  new Uint8Array(buffer).set(zip);
-
-  return new Blob([buffer], { type: WORD_MIME });
-}
-
-export function createDocxBlobChunkedZip(
-  projection: OutputProjection,
-  metadata: DocxMetadata,
-): Blob {
-  return new Blob(createZipBlobParts(createDocxPackage(projection, metadata)), { type: WORD_MIME });
+  return new Blob([zip.buffer as ArrayBuffer], { type: WORD_MIME });
 }
 
 export function benchmarkDocxWriters(
@@ -55,7 +45,7 @@ export function benchmarkDocxWriters(
   iterations = 50,
   now: () => number = () => performance.now(),
 ): DocxBenchmarkResult[] {
-  return (["package-buffer", "chunked-zip"] as const).map((strategy) => {
+  return (["naive", "optimized"] as const).map((strategy) => {
     const start = now();
     let sizeBytes = 0;
 
@@ -80,6 +70,30 @@ export function createDocxPackage(
     path: part.path,
     data: partXml(part, metadata),
   }));
+}
+
+function createOptimizedDocxPackage(
+  projection: OutputProjection,
+  metadata: DocxMetadata,
+): StoredZipEntry[] {
+  return [
+    ...cachedProjectionEntries(projection),
+    createStoredZipEntry("docProps/core.xml", corePropertiesXml(metadata)),
+  ];
+}
+
+function cachedProjectionEntries(projection: OutputProjection): StoredZipEntry[] {
+  const cached = projectionEntryCache.get(projection);
+  if (cached) {
+    return cached;
+  }
+
+  const entries = projection.parts
+    .filter((part) => part.role !== "coreProperties")
+    .map((part) => createStoredZipEntry(part.path, part.xml));
+  projectionEntryCache.set(projection, entries);
+
+  return entries;
 }
 
 function partXml(part: OoxmlPartProjection, metadata: DocxMetadata): string {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { createPipelineFromLexicalJson } from "../pipeline/createPipeline.ts";
 import { benchmarkDocxWriters, createDocxBlob, createDocxPackage } from "./docx.ts";
 import { escapeXml } from "./xml.ts";
-import { crc32, createZip, createZipBlobParts, listZipEntries } from "./zip.ts";
+import { crc32, createZipNaive, createZipOptimized, listZipEntries } from "./zip.ts";
 
 const projection = createPipelineFromLexicalJson({
   root: {
@@ -82,29 +82,29 @@ describe("OOXML writer", () => {
     ]);
   });
 
-  it("writes uncompressed zips with both whole-buffer and chunked writers", async () => {
+  it("writes equivalent uncompressed zips with naive and optimized writers", () => {
     const entries = [
       { path: "a.txt", data: "hello" },
       { path: "b.txt", data: "world" },
     ];
-    const wholeBufferZip = createZip(entries);
-    const chunkedZip = new Uint8Array(await new Blob(createZipBlobParts(entries)).arrayBuffer());
+    const naiveZip = createZipNaive(entries);
+    const optimizedZip = createZipOptimized(entries);
 
-    expect(wholeBufferZip).toEqual(chunkedZip);
-    expect(listZipEntries(wholeBufferZip)).toEqual(["a.txt", "b.txt"]);
+    expect(naiveZip).toEqual(optimizedZip);
+    expect(listZipEntries(optimizedZip)).toEqual(["a.txt", "b.txt"]);
     expect(crc32(new TextEncoder().encode("hello"))).toBe(0x3610a686);
-    expect(wholeBufferZip.at(-22)).toBe(0x50);
+    expect(optimizedZip.at(-22)).toBe(0x50);
   });
 
   it("emits Word blobs with both writer strategies", async () => {
-    const packageBufferBlob = createDocxBlob(projection, metadata, "package-buffer");
-    const chunkedZipBlob = createDocxBlob(projection, metadata, "chunked-zip");
-    const bytes = new Uint8Array(await chunkedZipBlob.arrayBuffer());
+    const naiveBlob = createDocxBlob(projection, metadata, "naive");
+    const optimizedBlob = createDocxBlob(projection, metadata, "optimized");
+    const bytes = new Uint8Array(await optimizedBlob.arrayBuffer());
 
-    expect(packageBufferBlob.type).toBe(
+    expect(naiveBlob.type).toBe(
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     );
-    expect(packageBufferBlob.size).toBe(chunkedZipBlob.size);
+    expect(naiveBlob.size).toBe(optimizedBlob.size);
     expect(listZipEntries(bytes)).toContain("word/document.xml");
     expect(listZipEntries(bytes)).toContain("word/numbering.xml");
   });
@@ -117,8 +117,8 @@ describe("OOXML writer", () => {
     });
 
     expect(results).toEqual([
-      { strategy: "package-buffer", durationMs: 3, sizeBytes: expect.any(Number), iterations: 2 },
-      { strategy: "chunked-zip", durationMs: 3, sizeBytes: expect.any(Number), iterations: 2 },
+      { strategy: "naive", durationMs: 3, sizeBytes: expect.any(Number), iterations: 2 },
+      { strategy: "optimized", durationMs: 3, sizeBytes: expect.any(Number), iterations: 2 },
     ]);
   });
 });

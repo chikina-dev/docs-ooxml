@@ -3,23 +3,26 @@ export type ZipEntry = {
   data: string | Uint8Array;
 };
 
-type PreparedZipEntry = {
+export type StoredZipEntry = {
   path: string;
   pathBytes: Uint8Array;
   dataBytes: Uint8Array;
   crc: number;
+};
+
+type PreparedZipEntry = StoredZipEntry & {
   offset: number;
 };
 
 const encoder = new TextEncoder();
 
-export function createZip(entries: ZipEntry[]): Uint8Array {
+export function createZipNaive(entries: ZipEntry[]): Uint8Array {
   const prepared = prepareEntries(entries);
-  const localFiles = prepared.map(writeLocalFile);
+  const localFiles = prepared.map(createLocalFile);
   const centralDirectoryOffset = byteLength(localFiles);
-  const centralDirectory = prepared.map(writeCentralDirectoryFile);
+  const centralDirectory = prepared.map(createCentralDirectoryFile);
   const centralDirectorySize = byteLength(centralDirectory);
-  const end = writeEndOfCentralDirectory(
+  const end = createEndOfCentralDirectory(
     entries.length,
     centralDirectorySize,
     centralDirectoryOffset,
@@ -28,25 +31,52 @@ export function createZip(entries: ZipEntry[]): Uint8Array {
   return concatBytes([...localFiles, ...centralDirectory, end]);
 }
 
-export function createZipBlobParts(entries: ZipEntry[]): BlobPart[] {
-  const prepared = prepareEntries(entries);
-  const localFiles = prepared.flatMap((entry) => [
-    writeLocalFileHeader(entry),
-    entry.pathBytes,
-    entry.dataBytes,
-  ]);
-  const centralDirectoryOffset = byteLengthParts(localFiles);
-  const centralDirectory = prepared.flatMap((entry) => [
-    writeCentralDirectoryFileHeader(entry),
-    entry.pathBytes,
-  ]);
-  const centralDirectorySize = byteLengthParts(centralDirectory);
+export function createZipOptimized(entries: ZipEntry[]): Uint8Array {
+  return createZipFromStoredEntries(
+    entries.map((entry) => createStoredZipEntry(entry.path, entry.data)),
+  );
+}
 
-  return bytesToBlobParts([
-    ...localFiles,
-    ...centralDirectory,
-    writeEndOfCentralDirectory(entries.length, centralDirectorySize, centralDirectoryOffset),
-  ]);
+export function createZipFromStoredEntries(entries: StoredZipEntry[]): Uint8Array {
+  const prepared = prepareStoredEntries(entries);
+  const centralDirectoryOffset = prepared.reduce(
+    (offset, entry) => offset + localFileLength(entry),
+    0,
+  );
+  const centralDirectorySize = prepared.reduce(
+    (size, entry) => size + centralDirectoryFileLength(entry),
+    0,
+  );
+  const output = new Uint8Array(centralDirectoryOffset + centralDirectorySize + 22);
+  let cursor = 0;
+
+  for (const entry of prepared) {
+    cursor = writeLocalFile(output, cursor, entry);
+  }
+
+  for (const entry of prepared) {
+    cursor = writeCentralDirectoryFile(output, cursor, entry);
+  }
+
+  writeEndOfCentralDirectory(
+    output,
+    cursor,
+    entries.length,
+    centralDirectorySize,
+    centralDirectoryOffset,
+  );
+
+  return output;
+}
+
+export function createStoredZipEntry(path: string, data: string | Uint8Array): StoredZipEntry {
+  const dataBytes = typeof data === "string" ? encoder.encode(data) : data;
+  return {
+    path,
+    pathBytes: encoder.encode(path),
+    dataBytes,
+    crc: crc32(dataBytes),
+  };
 }
 
 export function crc32(data: Uint8Array): number {
@@ -77,13 +107,20 @@ export function listZipEntries(zip: Uint8Array): string[] {
   return entries;
 }
 
-function writeLocalFile(entry: PreparedZipEntry): Uint8Array {
-  return concatBytes([writeLocalFileHeader(entry), entry.pathBytes, entry.dataBytes]);
+function writeLocalFile(output: Uint8Array, offset: number, entry: PreparedZipEntry): number {
+  writeLocalFileHeader(output, offset, entry);
+  output.set(entry.pathBytes, offset + 30);
+  output.set(entry.dataBytes, offset + 30 + entry.pathBytes.length);
+
+  return offset + localFileLength(entry);
 }
 
-function writeLocalFileHeader(entry: PreparedZipEntry): Uint8Array {
-  const header = new Uint8Array(30);
-  const view = new DataView(header.buffer);
+function createLocalFile(entry: PreparedZipEntry): Uint8Array {
+  return concatBytes([createLocalFileHeader(entry), entry.pathBytes, entry.dataBytes]);
+}
+
+function writeLocalFileHeader(output: Uint8Array, offset: number, entry: PreparedZipEntry): void {
+  const view = new DataView(output.buffer, output.byteOffset + offset, 30);
   view.setUint32(0, 0x04034b50, true);
   view.setUint16(4, 20, true);
   view.setUint16(6, 0, true);
@@ -95,17 +132,31 @@ function writeLocalFileHeader(entry: PreparedZipEntry): Uint8Array {
   view.setUint32(22, entry.dataBytes.length, true);
   view.setUint16(26, entry.pathBytes.length, true);
   view.setUint16(28, 0, true);
+}
 
+function createLocalFileHeader(entry: PreparedZipEntry): Uint8Array {
+  const header = new Uint8Array(30);
+  writeLocalFileHeader(header, 0, entry);
   return header;
 }
 
-function writeCentralDirectoryFile(entry: PreparedZipEntry): Uint8Array {
-  return concatBytes([writeCentralDirectoryFileHeader(entry), entry.pathBytes]);
+function writeCentralDirectoryFile(
+  output: Uint8Array,
+  offset: number,
+  entry: PreparedZipEntry,
+): number {
+  writeCentralDirectoryFileHeader(output, offset, entry);
+  output.set(entry.pathBytes, offset + 46);
+
+  return offset + centralDirectoryFileLength(entry);
 }
 
-function writeCentralDirectoryFileHeader(entry: PreparedZipEntry): Uint8Array {
-  const header = new Uint8Array(46);
-  const view = new DataView(header.buffer);
+function writeCentralDirectoryFileHeader(
+  output: Uint8Array,
+  offset: number,
+  entry: PreparedZipEntry,
+): void {
+  const view = new DataView(output.buffer, output.byteOffset + offset, 46);
   view.setUint32(0, 0x02014b50, true);
   view.setUint16(4, 20, true);
   view.setUint16(6, 20, true);
@@ -123,17 +174,26 @@ function writeCentralDirectoryFileHeader(entry: PreparedZipEntry): Uint8Array {
   view.setUint16(36, 0, true);
   view.setUint32(38, 0, true);
   view.setUint32(42, entry.offset, true);
+}
 
+function createCentralDirectoryFileHeader(entry: PreparedZipEntry): Uint8Array {
+  const header = new Uint8Array(46);
+  writeCentralDirectoryFileHeader(header, 0, entry);
   return header;
 }
 
+function createCentralDirectoryFile(entry: PreparedZipEntry): Uint8Array {
+  return concatBytes([createCentralDirectoryFileHeader(entry), entry.pathBytes]);
+}
+
 function writeEndOfCentralDirectory(
+  output: Uint8Array,
+  offset: number,
   entryCount: number,
   centralDirectorySize: number,
   centralDirectoryOffset: number,
-): Uint8Array {
-  const end = new Uint8Array(22);
-  const view = new DataView(end.buffer);
+): void {
+  const view = new DataView(output.buffer, output.byteOffset + offset, 22);
   view.setUint32(0, 0x06054b50, true);
   view.setUint16(4, 0, true);
   view.setUint16(6, 0, true);
@@ -142,7 +202,15 @@ function writeEndOfCentralDirectory(
   view.setUint32(12, centralDirectorySize, true);
   view.setUint32(16, centralDirectoryOffset, true);
   view.setUint16(20, 0, true);
+}
 
+function createEndOfCentralDirectory(
+  entryCount: number,
+  centralDirectorySize: number,
+  centralDirectoryOffset: number,
+): Uint8Array {
+  const end = new Uint8Array(22);
+  writeEndOfCentralDirectory(end, 0, entryCount, centralDirectorySize, centralDirectoryOffset);
   return end;
 }
 
@@ -162,33 +230,31 @@ function byteLength(chunks: Uint8Array[]): number {
   return chunks.reduce((length, chunk) => length + chunk.length, 0);
 }
 
-function byteLengthParts(chunks: Uint8Array[]): number {
-  return chunks.reduce((length, chunk) => length + chunk.byteLength, 0);
-}
-
-function bytesToBlobParts(chunks: Uint8Array[]): BlobPart[] {
-  return chunks.map((chunk) => {
-    const buffer = new ArrayBuffer(chunk.byteLength);
-    new Uint8Array(buffer).set(chunk);
-    return buffer;
-  });
-}
-
 function prepareEntries(entries: ZipEntry[]): PreparedZipEntry[] {
+  return prepareStoredEntries(entries.map((entry) => createStoredZipEntry(entry.path, entry.data)));
+}
+
+function prepareStoredEntries(entries: StoredZipEntry[]): PreparedZipEntry[] {
   let offset = 0;
   return entries.map((entry): PreparedZipEntry => {
-    const dataBytes = typeof entry.data === "string" ? encoder.encode(entry.data) : entry.data;
-    const pathBytes = encoder.encode(entry.path);
     const preparedEntry = {
       path: entry.path,
-      pathBytes,
-      dataBytes,
-      crc: crc32(dataBytes),
+      pathBytes: entry.pathBytes,
+      dataBytes: entry.dataBytes,
+      crc: entry.crc,
       offset,
     };
-    offset += 30 + pathBytes.length + dataBytes.length;
+    offset += 30 + entry.pathBytes.length + entry.dataBytes.length;
     return preparedEntry;
   });
+}
+
+function localFileLength(entry: PreparedZipEntry): number {
+  return 30 + entry.pathBytes.length + entry.dataBytes.length;
+}
+
+function centralDirectoryFileLength(entry: PreparedZipEntry): number {
+  return 46 + entry.pathBytes.length;
 }
 
 function readUint16(bytes: Uint8Array, offset: number): number {
