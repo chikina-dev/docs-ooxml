@@ -1,5 +1,11 @@
-import { createDocxBlob, type DocxWriteStrategy } from "../src/ooxml/docx.ts";
+import {
+  createNaiveDocxBlob,
+  createOptimizedDocxBlob,
+  prepareDocxPackage,
+  type DocxWriteStrategy,
+} from "../src/ooxml/docx.ts";
 import { createPipelineFromLexicalJson } from "../src/pipeline/createPipeline.ts";
+import type { OutputProjection } from "../src/pipeline/types.ts";
 
 type Scenario = {
   name: string;
@@ -41,19 +47,22 @@ const metadata = {
 };
 
 const rows = SCENARIOS.flatMap((scenario) => {
-  const projection = createPipelineFromLexicalJson(createLexicalFixture(scenario)).outputProjection;
   const samples = new Map<DocxWriteStrategy, Sample[]>(
     STRATEGIES.map((strategy) => [strategy, []]),
   );
 
   for (const strategy of STRATEGIES) {
-    runStrategy(strategy, projection, scenario.iterations, 3);
+    runStrategy(strategy, scenario, 3, 0);
   }
 
   for (let sampleIndex = 0; sampleIndex < SAMPLE_COUNT; sampleIndex += 1) {
     const order = sampleIndex % 2 === 0 ? STRATEGIES : [...STRATEGIES].reverse();
     for (const strategy of order) {
-      samples.get(strategy)?.push(runStrategy(strategy, projection, scenario.iterations));
+      samples
+        .get(strategy)
+        ?.push(
+          runStrategy(strategy, scenario, scenario.iterations, sampleIndex * scenario.iterations),
+        );
     }
   }
 
@@ -89,7 +98,7 @@ const summary = `## DOCX Writer Benchmark
 
 Measured in GitHub Actions with Bun on \`ubuntu-latest\`.
 
-This benchmark compares a deliberately naive writer against an optimized writer. \`naive\` rebuilds XML strings as package entries, re-encodes each part, computes CRCs, creates many small ZIP buffers, and concatenates them. \`optimized\` caches stable OOXML part bytes on the Output Projection and writes the ZIP into one preallocated buffer.
+This benchmark compares a deliberately naive writer against an optimized writer while generating a fresh Output Projection for every iteration. \`naive\` rebuilds XML strings as package entries, re-encodes each part, computes CRCs, creates many small ZIP buffers, and concatenates them. \`optimized\` prepares each fresh projection, reuses only projection-independent static OOXML parts, and writes the ZIP into one preallocated buffer.
 
 Each row reports the median of ${SAMPLE_COUNT} samples. Each sample performs the listed number of writer iterations.
 
@@ -112,19 +121,18 @@ if (stepSummaryPath) {
 
 function runStrategy(
   strategy: DocxWriteStrategy,
-  projection: ReturnType<typeof createPipelineFromLexicalJson>["outputProjection"],
+  scenario: Scenario,
   iterations: number,
-  warmupIterations = 0,
+  variantOffset: number,
 ): Sample {
-  for (let index = 0; index < warmupIterations; index += 1) {
-    createDocxBlob(projection, metadata, strategy);
-  }
-
   const start = performance.now();
   let sizeBytes = 0;
 
   for (let index = 0; index < iterations; index += 1) {
-    sizeBytes = createDocxBlob(projection, metadata, strategy).size;
+    const projection = createPipelineFromLexicalJson(
+      createLexicalFixture(scenario, variantOffset + index),
+    ).outputProjection;
+    sizeBytes = createBlob(strategy, projection).size;
   }
 
   return {
@@ -133,14 +141,27 @@ function runStrategy(
   };
 }
 
-function createLexicalFixture(scenario: Scenario) {
+function createBlob(strategy: DocxWriteStrategy, projection: OutputProjection): Blob {
+  if (strategy === "naive") {
+    return createNaiveDocxBlob(projection, metadata);
+  }
+
+  const preparedPackage = prepareDocxPackage(projection);
+  return createOptimizedDocxBlob(preparedPackage, metadata);
+}
+
+function createLexicalFixture(scenario: Scenario, variant = 0) {
+  const variantLabel = variant.toString().padStart(6, "0");
+
   return {
     root: {
       children: [
         {
           type: "heading",
           tag: "h1",
-          children: [{ type: "text", text: `${scenario.name} benchmark`, format: 1 }],
+          children: [
+            { type: "text", text: `${scenario.name} benchmark ${variantLabel}`, format: 1 },
+          ],
         },
         ...Array.from({ length: scenario.paragraphs }, (_, index) => ({
           type: "paragraph",
@@ -148,7 +169,7 @@ function createLexicalFixture(scenario: Scenario) {
             { type: "text", text: `Paragraph ${index + 1}: `, format: 1 },
             {
               type: "text",
-              text: "This paragraph exercises XML escaping, run projection, and ZIP packaging. ",
+              text: `This paragraph exercises XML escaping, run projection, and ZIP packaging for variant ${variantLabel}. `,
               format: 0,
             },
             { type: "text", text: "A&B <quoted> content.", format: index % 2 === 0 ? 10 : 0 },
@@ -159,7 +180,13 @@ function createLexicalFixture(scenario: Scenario) {
           listType: "number",
           children: Array.from({ length: scenario.listItems }, (_, index) => ({
             type: "listitem",
-            children: [{ type: "text", text: `Measured list item ${index + 1}`, format: 0 }],
+            children: [
+              {
+                type: "text",
+                text: `Measured list item ${index + 1} for variant ${variantLabel}`,
+                format: 0,
+              },
+            ],
           })),
         },
       ],

@@ -38,24 +38,25 @@ export function createZipOptimized(entries: ZipEntry[]): Uint8Array {
 }
 
 export function createZipFromStoredEntries(entries: StoredZipEntry[]): Uint8Array {
-  const prepared = prepareStoredEntries(entries);
-  const centralDirectoryOffset = prepared.reduce(
-    (offset, entry) => offset + localFileLength(entry),
+  const centralDirectoryOffset = entries.reduce(
+    (offset, entry) => offset + storedLocalFileLength(entry),
     0,
   );
-  const centralDirectorySize = prepared.reduce(
-    (size, entry) => size + centralDirectoryFileLength(entry),
+  const centralDirectorySize = entries.reduce(
+    (size, entry) => size + storedCentralDirectoryFileLength(entry),
     0,
   );
   const output = new Uint8Array(centralDirectoryOffset + centralDirectorySize + 22);
   let cursor = 0;
 
-  for (const entry of prepared) {
-    cursor = writeLocalFile(output, cursor, entry);
+  for (const entry of entries) {
+    cursor = writeStoredLocalFile(output, cursor, entry);
   }
 
-  for (const entry of prepared) {
-    cursor = writeCentralDirectoryFile(output, cursor, entry);
+  let localOffset = 0;
+  for (const entry of entries) {
+    cursor = writeStoredCentralDirectoryFile(output, cursor, entry, localOffset);
+    localOffset += storedLocalFileLength(entry);
   }
 
   writeEndOfCentralDirectory(
@@ -107,19 +108,19 @@ export function listZipEntries(zip: Uint8Array): string[] {
   return entries;
 }
 
-function writeLocalFile(output: Uint8Array, offset: number, entry: PreparedZipEntry): number {
+function writeStoredLocalFile(output: Uint8Array, offset: number, entry: StoredZipEntry): number {
   writeLocalFileHeader(output, offset, entry);
   output.set(entry.pathBytes, offset + 30);
   output.set(entry.dataBytes, offset + 30 + entry.pathBytes.length);
 
-  return offset + localFileLength(entry);
+  return offset + storedLocalFileLength(entry);
 }
 
 function createLocalFile(entry: PreparedZipEntry): Uint8Array {
   return concatBytes([createLocalFileHeader(entry), entry.pathBytes, entry.dataBytes]);
 }
 
-function writeLocalFileHeader(output: Uint8Array, offset: number, entry: PreparedZipEntry): void {
+function writeLocalFileHeader(output: Uint8Array, offset: number, entry: StoredZipEntry): void {
   const view = new DataView(output.buffer, output.byteOffset + offset, 30);
   view.setUint32(0, 0x04034b50, true);
   view.setUint16(4, 20, true);
@@ -140,21 +141,23 @@ function createLocalFileHeader(entry: PreparedZipEntry): Uint8Array {
   return header;
 }
 
-function writeCentralDirectoryFile(
+function writeStoredCentralDirectoryFile(
   output: Uint8Array,
   offset: number,
-  entry: PreparedZipEntry,
+  entry: StoredZipEntry,
+  localOffset: number,
 ): number {
-  writeCentralDirectoryFileHeader(output, offset, entry);
+  writeCentralDirectoryFileHeader(output, offset, entry, localOffset);
   output.set(entry.pathBytes, offset + 46);
 
-  return offset + centralDirectoryFileLength(entry);
+  return offset + storedCentralDirectoryFileLength(entry);
 }
 
 function writeCentralDirectoryFileHeader(
   output: Uint8Array,
   offset: number,
-  entry: PreparedZipEntry,
+  entry: StoredZipEntry,
+  localOffset: number,
 ): void {
   const view = new DataView(output.buffer, output.byteOffset + offset, 46);
   view.setUint32(0, 0x02014b50, true);
@@ -173,12 +176,12 @@ function writeCentralDirectoryFileHeader(
   view.setUint16(34, 0, true);
   view.setUint16(36, 0, true);
   view.setUint32(38, 0, true);
-  view.setUint32(42, entry.offset, true);
+  view.setUint32(42, localOffset, true);
 }
 
 function createCentralDirectoryFileHeader(entry: PreparedZipEntry): Uint8Array {
   const header = new Uint8Array(46);
-  writeCentralDirectoryFileHeader(header, 0, entry);
+  writeCentralDirectoryFileHeader(header, 0, entry, entry.offset);
   return header;
 }
 
@@ -249,11 +252,11 @@ function prepareStoredEntries(entries: StoredZipEntry[]): PreparedZipEntry[] {
   });
 }
 
-function localFileLength(entry: PreparedZipEntry): number {
+function storedLocalFileLength(entry: StoredZipEntry): number {
   return 30 + entry.pathBytes.length + entry.dataBytes.length;
 }
 
-function centralDirectoryFileLength(entry: PreparedZipEntry): number {
+function storedCentralDirectoryFileLength(entry: StoredZipEntry): number {
   return 46 + entry.pathBytes.length;
 }
 
